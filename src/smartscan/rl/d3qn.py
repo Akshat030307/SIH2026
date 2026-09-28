@@ -94,13 +94,25 @@ class Replay:
         self.demo = np.zeros(capacity, bool)
         self.tree = SumTree(capacity)
         self.n, self.ptr, self.max_p = 0, 0, 1.0
+        self.floor = 0  # slots below this index are permanent (demonstrations)
+
+    def protect(self) -> None:
+        """Make everything stored so far permanent: later writes cycle over the remaining slots.
+
+        DQfD keeps demonstrations for the whole run. Without this, the ring buffer
+        overwrites them and the margin loss silently disappears.
+        """
+        self.floor = self.n
+        self.ptr = self.n % self.cap
 
     def add(self, s, a, r, s2, g, a_exp=-1, demo=False):
         i = self.ptr
         self.s[i], self.a[i], self.r[i], self.s2[i], self.g[i] = s, a, r, s2, g
         self.a_exp[i], self.demo[i] = a_exp, demo
         self.tree.update(np.array([i]), np.array([self.max_p]))
-        self.ptr = (self.ptr + 1) % self.cap
+        self.ptr = self.ptr + 1
+        if self.ptr >= self.cap:
+            self.ptr = self.floor
         self.n = min(self.n + 1, self.cap)
 
     def sample(self, bs: int, rng, beta: float = 0.4):

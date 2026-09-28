@@ -107,6 +107,7 @@ def train(steps=1_000_000, n_envs=12, demo_steps=120_000, pretrain=15_000, batch
           f"({time.time() - t0:.0f}s)")
     tb.add_scalar("demo/pd_weighted", np.mean(ep_pd) if ep_pd else 0.0, 0)
     ep_pd.clear()
+    rb.protect()  # demonstrations stay in the replay for the whole run
 
     # 2. pre-training
     for k in range(pretrain):

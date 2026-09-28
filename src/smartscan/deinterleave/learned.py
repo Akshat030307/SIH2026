@@ -159,7 +159,10 @@ def main(argv=None):
     ap.add_argument("cmd", choices=["train", "eval"])
     ap.add_argument("--epochs", type=int, default=12)
     ap.add_argument("--seeds", type=int, default=120)
+    ap.add_argument("--threads", type=int, default=None)
     a = ap.parse_args(argv)
+    if a.threads:
+        torch.set_num_threads(a.threads)
     if a.cmd == "train":
         train(a.epochs, a.seeds)
     else:
