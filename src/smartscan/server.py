@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -35,6 +36,15 @@ from smartscan.sim.engine import RFEngine
 from smartscan.sim.world import ROOT, build_world, list_scenarios, load_scenario
 
 app = FastAPI(title="Smart Scan EW")
+
+
+def _warm_up():
+    """Import torch and load the D3QN stack once, so the first mission doesn't stall on a cold import."""
+    if (ROOT / "checkpoints" / "d3qn_best.pt").exists():
+        make_scheduler("d3qn")
+
+
+threading.Thread(target=_warm_up, daemon=True).start()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 DIST = ROOT / "dashboard" / "web" / "dist"
 
@@ -174,7 +184,7 @@ async def run(ws: WebSocket):
         names = cfg.get("schedulers") or ["sweep", "smart"]
         speed = float(cfg.get("speed", 4.0))
         frame_s = float(cfg.get("frame_s", 0.1))
-        streams = [Stream(n, scenario, seed) for n in names]
+        streams = await asyncio.to_thread(lambda: [Stream(n, scenario, seed) for n in names])
         await ws.send_text(json.dumps(_clean(_init_payload(streams))))
         gt = streams[0].eng.truth
         ev_order = np.argsort(gt.end)
