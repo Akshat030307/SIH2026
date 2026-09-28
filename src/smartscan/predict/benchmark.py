@@ -70,7 +70,7 @@ def score(pred, seqs, s2m) -> dict:
 def main():
     rows = []
     for drop in (0.0, 0.3):
-        train = emitter_sequences("S3_mfr", seeds=range(0, 150), drop=drop, rng_seed=1)
+        train = emitter_sequences("S3_mfr", seeds=range(150), drop=drop, rng_seed=1)
         test = emitter_sequences("S3_mfr", seeds=range(1000, 1040), drop=drop, rng_seed=2)
         seqs = [s for s, _, _ in train]
         s2m = symbol_to_mode(train)

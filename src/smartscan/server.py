@@ -129,7 +129,7 @@ class Stream:
             assign = self.sched.observe(res.t_listen, res.t_end, res.channel, P.strip_truth(res.pdws))
             record(self.log, res, act, assign)
             dwells.append([round(res.t_listen, 5), round(res.t_end, 5), res.channel, act.reason,
-                           int((res.pdws["emitter"] >= 0).sum()), int(len(res.new_intercepts))])
+                           int((res.pdws["emitter"] >= 0).sum()), len(res.new_intercepts)])
         return dwells
 
     def metrics(self) -> dict:
@@ -143,7 +143,7 @@ class Stream:
                             if ended.any() else None)
         m["events_done"] = int(ended.sum())
         m["events_intercepted"] = int(gt.intercepted[ended].sum())
-        m["emitters_intercepted"] = int(len(np.unique(gt.emitter[gt.intercepted])))
+        m["emitters_intercepted"] = len(np.unique(gt.emitter[gt.intercepted]))
         return m
 
 

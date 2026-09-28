@@ -20,8 +20,8 @@ from collections import deque
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 from smartscan.rl.perception import F_CH, F_GLOBAL
 

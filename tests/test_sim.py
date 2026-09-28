@@ -3,7 +3,7 @@ import pytest
 
 from smartscan.sim.emitter import Emitter, Segment, Waveform
 from smartscan.sim.engine import RFEngine
-from smartscan.sim.propagation import snr_db, noise_power_dbw, beam_gain_db
+from smartscan.sim.propagation import beam_gain_db, noise_power_dbw, snr_db
 from smartscan.sim.receiver import ReceiverSpec
 from smartscan.sim.world import World, build_world, list_scenarios
 
@@ -65,7 +65,7 @@ def test_engine_detects_only_in_mainlobe_and_books_events():
     assert np.all(r.pdws["emitter"] == 0)
     assert len(r.new_intercepts) == 1
     # far from the beam: nothing
-    r2 = eng.step(ch, rx.n_dwells - 1)
+    eng.step(ch, rx.n_dwells - 1)
     eng.t = 2.5
     r3 = eng.step(ch, rx.n_dwells - 1)
     assert len(r3.pdws) == 0

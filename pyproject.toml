@@ -47,5 +47,8 @@ torch = { index = "pytorch-cu128" }
 [tool.ruff]
 line-length = 110
 
+[tool.ruff.lint]
+extend-ignore = ["C408"]  # dict(...) keyword construction is used deliberately for config-like dicts
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

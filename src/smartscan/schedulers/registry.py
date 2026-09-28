@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from smartscan.schedulers.bandit import BanditScheduler
-from smartscan.schedulers.baselines import LinearSweep, RandomScan, RoundRobinPrior
 from smartscan.schedulers.base import Scheduler
+from smartscan.schedulers.baselines import LinearSweep, RandomScan, RoundRobinPrior
 from smartscan.schedulers.heuristic import SmartHeuristic
 
 DESCRIPTIONS = {

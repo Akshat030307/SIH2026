@@ -8,9 +8,9 @@ from __future__ import annotations
 import argparse
 
 from smartscan.eval import run_benchmark
-from smartscan.util import md_table
 from smartscan.schedulers.registry import ABLATIONS
 from smartscan.sim.world import ROOT, list_scenarios
+from smartscan.util import md_table
 
 WHAT = {
     "smart": "full scheduler",

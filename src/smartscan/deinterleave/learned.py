@@ -20,35 +20,17 @@ from __future__ import annotations
 
 import argparse
 import time
-from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
+from smartscan.deinterleave.dataset import N_FREQ, WINDOW, cached_training_set, pulse_inputs
 from smartscan.sim.world import ROOT
 from smartscan.util import md_table
 
 CKPT = ROOT / "checkpoints" / "deinterleaver.pt"
-WINDOW = 256
-N_FREQ = 16
-
-
-def pulse_inputs(pdws: np.ndarray) -> np.ndarray:
-    """(N, 5 + 2·N_FREQ) float32 inputs. Time features are relative to the first pulse."""
-    a = np.deg2rad(pdws["aoa"])
-    toa = pdws["toa"] - pdws["toa"][0]
-    # periods from 20 µs to ~20 ms, log-spaced
-    periods = np.geomspace(20e-6, 20e-3, N_FREQ)
-    ph = 2 * np.pi * toa[:, None] / periods[None, :]
-    static = np.stack([
-        (pdws["rf"] - 10e9) / 5e9,
-        np.log10(np.maximum(pdws["pw"], 1e-9) * 1e6),
-        np.sin(a), np.cos(a),
-        (pdws["amp"] - 30.0) / 15.0,
-    ], axis=1)
-    return np.concatenate([static, np.sin(ph), np.cos(ph)], axis=1).astype(np.float32)
 
 
 class PulseEncoder(nn.Module):
@@ -79,71 +61,30 @@ def supcon_loss(z: torch.Tensor, y: torch.Tensor, mask: torch.Tensor, tau: float
     return loss[keep].mean()
 
 
-# ------------------------------------------------------------------ data
-def make_windows(pdws: np.ndarray, rng, n: int, window: int = WINDOW):
-    x = pulse_inputs(pdws)
-    y = pdws["emitter"].astype(np.int64)
-    out = []
-    for _ in range(n):
-        if len(x) <= window:
-            s = 0
-        else:
-            s = int(rng.integers(0, len(x) - window))
-        xs, ys = x[s:s + window].copy(), y[s:s + window]
-        xs[:, 5:] = pulse_inputs(pdws[s:s + window])[:, 5:]  # time features relative to the window start
-        out.append((xs, ys))
-    return out
-
-
-def build_training_set(seeds, scenarios=("S7_colocated", "S2_dense"), duration=1.5, per_stream=40):
-    from smartscan.deinterleave.data import busiest_channels, simulate_stream
-
-    rng = np.random.default_rng(0)
-    data = []
-    for sc in scenarios:
-        for s in seeds:
-            ch = busiest_channels(sc, s, k=6)
-            p = simulate_stream(sc, seed=s, duration=duration, channels=ch, t0=float(rng.uniform(0, 30)))
-            if len(p) < 64:
-                continue
-            data += make_windows(p, rng, per_stream)
-    return data
-
-
-def collate(batch, device):
-    L = max(len(x) for x, _ in batch)
-    B = len(batch)
-    X = np.zeros((B, L, batch[0][0].shape[1]), np.float32)
-    Y = np.full((B, L), -1, np.int64)
-    M = np.zeros((B, L), bool)
-    for i, (x, y) in enumerate(batch):
-        X[i, :len(x)], Y[i, :len(y)], M[i, :len(x)] = x, y, True
-    return (torch.from_numpy(X).to(device), torch.from_numpy(Y).to(device), torch.from_numpy(M).to(device))
-
-
 def train(epochs: int = 12, n_seeds: int = 120, batch: int = 32, lr: float = 3e-4, device: str | None = None):
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     t = time.time()
-    data = build_training_set(range(n_seeds))
-    print(f"{len(data)} windows built in {time.time() - t:.0f}s; training on {device}")
+    X, Y, M = cached_training_set(n_seeds)
+    print(f"{len(X)} windows ready in {time.time() - t:.0f}s; training on {device}")
     model = PulseEncoder().to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
-    steps = epochs * (len(data) // batch)
+    steps = epochs * (len(X) // batch)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, lr, total_steps=steps)
     rng = np.random.default_rng(1)
     for ep in range(epochs):
-        perm = rng.permutation(len(data))
+        perm = rng.permutation(len(X))
         tot = 0.0
-        for k in range(len(data) // batch):
-            X, Y, M = collate([data[i] for i in perm[k * batch:(k + 1) * batch]], device)
-            loss = supcon_loss(model(X, ~M), Y, M)
+        for k in range(len(X) // batch):
+            b = perm[k * batch:(k + 1) * batch]
+            xb, yb, mb = (torch.from_numpy(a[b]).to(device) for a in (X, Y, M))
+            loss = supcon_loss(model(xb, ~mb), yb, mb)
             opt.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step()
             sched.step()
             tot += loss.item()
-        print(f"epoch {ep + 1}/{epochs} loss {tot / (len(data) // batch):.4f}")
+        print(f"epoch {ep + 1}/{epochs} loss {tot / (len(X) // batch):.4f}")
     CKPT.parent.mkdir(parents=True, exist_ok=True)
     torch.save(model.state_dict(), CKPT)
     print(f"saved {CKPT}")

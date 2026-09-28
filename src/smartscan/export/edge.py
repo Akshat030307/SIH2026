@@ -18,6 +18,7 @@ import numpy as np
 import torch
 
 from smartscan.rl.d3qn import DuelingQNet
+from smartscan.rl.perception import F_CH, F_GLOBAL
 from smartscan.rl.policy import DEFAULT_CKPT, D3QNScheduler
 from smartscan.sim.world import ROOT, build_world
 from smartscan.util import md_table
@@ -29,7 +30,7 @@ def export_onnx(ckpt=DEFAULT_CKPT):
     ck = torch.load(ckpt, map_location="cpu")
     net = DuelingQNet(ck["K"], ck["D"]).eval()
     net.load_state_dict(ck["q"])
-    obs_dim = net.K * 14 + 5
+    obs_dim = net.K * F_CH + F_GLOBAL
     fp32 = OUT / "d3qn_fp32.onnx"
     torch.onnx.export(net, torch.zeros(1, obs_dim), str(fp32), input_names=["obs"], output_names=["q"],
                       dynamic_axes={"obs": {0: "batch"}, "q": {0: "batch"}}, opset_version=17, dynamo=False)
@@ -98,7 +99,7 @@ def main():
         so.intra_op_num_threads = 1
         s = ort.InferenceSession(str(path), so, providers=["CPUExecutionProvider"])
         sess[name] = s
-        rows.append((name + " (1 thread)", *_lat(lambda x: s.run(None, {"obs": x}), x1)))
+        rows.append((name + " (1 thread)", *_lat(lambda x, s=s: s.run(None, {"obs": x}), x1)))
     # fidelity
     q32 = sess["ONNX Runtime FP32"].run(None, {"obs": states})[0]
     q8 = sess["ONNX Runtime INT8"].run(None, {"obs": states})[0]
@@ -116,7 +117,7 @@ def main():
         return a
 
     sched.act = timed
-    m8, _, _ = run_episode(world, sched, seed=300)
+    run_episode(world, sched, seed=300)
     loop = np.array(loop) * 1e6
     rows.append(("Full decision (features + INT8), S2_dense", float(np.percentile(loop, 50)),
                  float(np.percentile(loop, 99))))
@@ -131,7 +132,7 @@ def main():
     sizes = {p.name: p.stat().st_size / 1024 for p in [fp32, int8]}
     out = ROOT / "results" / "edge"
     out.mkdir(parents=True, exist_ok=True)
-    md = ["# Edge inference benchmark", "", f"Model sizes: " + ", ".join(f"{k} {v:.0f} KiB" for k, v in sizes.items()),
+    md = ["# Edge inference benchmark", "", "Model sizes: " + ", ".join(f"{k} {v:.0f} KiB" for k, v in sizes.items()),
           "", f"FP32 vs INT8 greedy-action agreement on {len(states)} recorded states: **{agree:.3f}**", "",
           "## Latency per decision (µs)", "", md_table(lat, index=False), "",
           "## Scheduling metrics, FP32 vs INT8 (seed 150)", "", md_table(met, index=False), ""]

@@ -85,7 +85,7 @@ def load(path: Path) -> np.ndarray:
     import h5py
 
     with h5py.File(path, "r") as f:
-        keys = {k.lower(): k for k in f.keys()}
+        keys = {k.lower(): k for k in f}
         xk = next((keys[k] for k in _FEATURE_KEYS if k in keys), None)
         yk = next((keys[k] for k in _LABEL_KEYS if k in keys), None)
         if xk is None or yk is None:

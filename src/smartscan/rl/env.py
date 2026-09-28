@@ -35,7 +35,7 @@ class RewardCfg:
 
 
 class SmartScanEnv(gym.Env):
-    metadata = {"render_modes": []}
+    metadata = {"render_modes": []}  # noqa: RUF012 (gymnasium convention)
 
     def __init__(self, scenarios=DEFAULT_SCENARIOS, seed: int = 0, reward: RewardCfg | None = None,
                  duration: float | None = None, behaviour=None):

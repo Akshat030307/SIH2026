@@ -17,7 +17,7 @@ def load_behaviour(fit_if_missing: bool = True):
             return pickle.load(f)
     if not fit_if_missing:
         return None
-    seqs = [s for s, _, _ in emitter_sequences("S3_mfr", seeds=range(0, 100), drop=0.3, rng_seed=5)]
+    seqs = [s for s, _, _ in emitter_sequences("S3_mfr", seeds=range(100), drop=0.3, rng_seed=5)]
     model = NGram(3).fit(seqs)
     PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(PATH, "wb") as f:

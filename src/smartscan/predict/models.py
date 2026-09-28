@@ -24,7 +24,7 @@ from smartscan.predict.symbols import N_SYMBOLS
 class Predictor:
     name = "base"
 
-    def fit(self, seqs: list[np.ndarray]) -> "Predictor":
+    def fit(self, seqs: list[np.ndarray]) -> Predictor:
         return self
 
     def predict_proba(self, history: np.ndarray) -> np.ndarray:

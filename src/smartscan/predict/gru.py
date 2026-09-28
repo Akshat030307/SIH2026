@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import torch
-import torch.nn as nn
+from torch import nn
 
 from smartscan.predict.models import Predictor
 from smartscan.predict.symbols import N_SYMBOLS

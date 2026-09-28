@@ -28,7 +28,7 @@ def test_env_observation_and_expert():
     assert np.isfinite(obs).all()
     total = 0.0
     for _ in range(300):
-        obs, r, done, _, info = env.step(info["expert"])
+        obs, r, _, _, info = env.step(info["expert"])
         total += r
         assert np.isfinite(obs).all() and obs.min() >= -2 and obs.max() <= 2
     assert total > 0  # the heuristic intercepts something in 300 dwells

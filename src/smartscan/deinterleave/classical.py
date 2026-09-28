@@ -104,6 +104,6 @@ def clustering_scores(true: np.ndarray, pred: np.ndarray) -> dict:
         ari=float(skm.adjusted_rand_score(true, pred)),
         ami=float(skm.adjusted_mutual_info_score(true, pred)),
         v_measure=float(v), homogeneity=float(h), completeness=float(c),
-        n_true=int(len(np.unique(true))), n_pred=int(len(np.unique(pred[pred >= 0]))),
+        n_true=len(np.unique(true)), n_pred=len(np.unique(pred[pred >= 0])),
         noise_frac=float((pred < 0).mean()),
     )

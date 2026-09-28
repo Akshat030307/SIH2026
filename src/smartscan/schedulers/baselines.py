@@ -56,7 +56,7 @@ class RoundRobinPrior(Scheduler):
 
     name = "round_robin"
 
-    BANDS_GHZ = [(2.7, 3.5), (5.2, 5.9), (8.5, 10.5), (13.0, 17.5)]
+    BANDS_GHZ = ((2.7, 3.5), (5.2, 5.9), (8.5, 10.5), (13.0, 17.5))
 
     def __init__(self, dwell_s: float = 0.01, boost: int = 2):
         self.dwell_s = dwell_s

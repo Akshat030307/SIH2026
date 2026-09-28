@@ -68,7 +68,7 @@ class ReceiverSpec:
         return divmod(int(a), self.n_dwells)
 
     @classmethod
-    def from_dict(cls, d: dict | None) -> "ReceiverSpec":
+    def from_dict(cls, d: dict | None) -> ReceiverSpec:
         d = dict(d or {})
         conv = {"f_min_ghz": ("f_min_hz", 1e9), "f_max_ghz": ("f_max_hz", 1e9), "ibw_mhz": ("ibw_hz", 1e6),
                 "tune_us": ("tune_s", 1e-6), "detect_bw_mhz": ("detect_bw_hz", 1e6)}
