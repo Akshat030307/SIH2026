@@ -1,0 +1,156 @@
+# Emitter class library.
+#
+# Parameter ranges are representative values for each radar family, taken from
+# open sources (radar handbooks, Air Power Australia system pages). They do NOT
+# describe any specific real system. Each field [lo, hi] is sampled uniformly
+# per emitter instance ("log" marks log-uniform sampling).
+#
+# priority: ground-truth threat weight, used for scoring and reward only.
+#           Schedulers never see it and must infer threat from observables.
+
+classes:
+  surveillance:            # long-range early-warning / volume search, mechanically rotating
+    priority: 1.0
+    scan: circular
+    range_km: [120, 380]
+    pt_kw: [300, 1500]
+    gain_db: [32, 37]
+    beamwidth_deg: [1.5, 3.0]
+    sidelobe_db: [-48, -40]
+    scan_period_s: [5.0, 12.0]
+    rf_ghz: [2.7, 3.5]
+    hop: fixed
+    pri_us: [1500, 3500]
+    pri_types: [fixed, stagger]
+    pw_us: [2, 8]
+
+  coastal:                 # coastal / navigation surveillance, fast rotating X-band
+    priority: 1.5
+    scan: circular
+    range_km: [40, 150]
+    pt_kw: [10, 60]
+    gain_db: [30, 34]
+    beamwidth_deg: [1.0, 2.0]
+    sidelobe_db: [-45, -38]
+    scan_period_s: [2.0, 5.0]
+    rf_ghz: [9.2, 9.5]
+    hop: fixed
+    pri_us: [500, 1500]
+    pri_types: [fixed, jitter]
+    pw_us: [0.2, 1.0]
+
+  acquisition:             # target acquisition radar for SAM systems
+    priority: 3.0
+    scan: circular
+    range_km: [60, 200]
+    pt_kw: [80, 400]
+    gain_db: [33, 38]
+    beamwidth_deg: [1.2, 2.5]
+    sidelobe_db: [-48, -40]
+    scan_period_s: [1.5, 4.0]
+    rf_ghz: [5.3, 5.9]
+    hop: fixed
+    pri_us: [400, 1200]
+    pri_types: [stagger, dwell_switch, sliding]
+    pw_us: [0.8, 3.0]
+
+  agile:                   # frequency-agile search radar, pulse-to-pulse hopping
+    priority: 3.5
+    scan: circular
+    range_km: [50, 180]
+    pt_kw: [20, 150]
+    gain_db: [32, 36]
+    beamwidth_deg: [1.5, 3.0]
+    sidelobe_db: [-45, -38]
+    scan_period_s: [2.0, 6.0]
+    rf_ghz: [13.0, 16.0]
+    agile_span_mhz: [400, 1200]
+    agile_channels: [6, 24]
+    hop: pulse
+    pri_us: [300, 900]
+    pri_types: [jitter, stagger]
+    pw_us: [0.3, 1.5]
+
+  lpi:                     # low probability of intercept: low peak power, long pulses
+    priority: 4.0
+    scan: circular
+    range_km: [15, 60]
+    pt_kw: [0.002, 0.05]
+    gain_db: [30, 34]
+    beamwidth_deg: [2.0, 4.0]
+    sidelobe_db: [-50, -42]
+    scan_period_s: [2.0, 5.0]
+    rf_ghz: [9.0, 10.0]
+    hop: fixed
+    pri_us: [50, 200]
+    pri_types: [fixed, jitter]
+    pw_us: [20, 80]
+
+  mfr:                     # AESA multi-function radar; modes form a semi-Markov chain
+    priority: 3.0
+    scan: electronic
+    range_km: [40, 160]
+    pt_kw: [20, 120]
+    gain_db: [34, 40]
+    beamwidth_deg: [1.5, 3.0]
+    sidelobe_db: [-50, -42]
+    rf_ghz: [8.5, 10.5]
+    agile_span_mhz: [300, 900]
+    agile_channels: [4, 12]
+    hop: burst
+    burst_len: [8, 32]
+    modes:
+      search:
+        priority: 2.5
+        duration_s: [4.0, 9.0]
+        revisit_s: [0.8, 2.0]
+        illum_ms: [8, 20]
+        pri_us: [700, 1500]
+        pri_types: [stagger, dwell_switch]
+        pw_us: [5, 20]
+      acquisition:
+        priority: 4.0
+        duration_s: [1.0, 3.0]
+        revisit_s: [0.25, 0.6]
+        illum_ms: [10, 25]
+        pri_us: [200, 500]
+        pri_types: [dwell_switch, jitter]
+        pw_us: [2, 8]
+      track:
+        priority: 5.0
+        duration_s: [2.0, 6.0]
+        revisit_s: [0.08, 0.2]
+        illum_ms: [4, 10]
+        pri_us: [40, 120]
+        pri_types: [fixed, stagger]
+        pw_us: [0.5, 2]
+    # next-mode probabilities (rows: from search, acquisition, track)
+    transitions:
+      - [0.0, 0.8, 0.2]
+      - [0.3, 0.0, 0.7]
+      - [0.85, 0.15, 0.0]
+
+  fire_control:            # engagement radar: pops up late, high PRF, fast revisit
+    priority: 5.0
+    scan: electronic
+    range_km: [25, 90]
+    pt_kw: [10, 60]
+    gain_db: [36, 42]
+    beamwidth_deg: [1.0, 2.0]
+    sidelobe_db: [-50, -44]
+    rf_ghz: [14.0, 17.5]
+    agile_span_mhz: [200, 500]
+    agile_channels: [4, 10]
+    hop: burst
+    burst_len: [16, 64]
+    modes:
+      track:
+        priority: 5.0
+        duration_s: [1000, 1000]
+        revisit_s: [0.1, 0.3]
+        illum_ms: [5, 12]
+        pri_us: [30, 100]
+        pri_types: [fixed, jitter]
+        pw_us: [0.3, 1.0]
+    transitions:
+      - [1.0]

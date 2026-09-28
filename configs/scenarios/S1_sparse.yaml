@@ -1,0 +1,7 @@
+name: S1_sparse
+description: A handful of periodic, mechanically scanning radars. Sanity check for period lock.
+duration_s: 40
+emitters:
+  surveillance: 2
+  coastal: 2
+  acquisition: 1

@@ -1,0 +1,10 @@
+name: S2_dense
+description: Congested spectrum, ~40 simultaneous emitters with overlapping parameters.
+duration_s: 40
+emitters:
+  surveillance: 6
+  coastal: 10
+  acquisition: 8
+  agile: 5
+  mfr: 5
+  lpi: 3

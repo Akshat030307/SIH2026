@@ -1,0 +1,14 @@
+name: S6_lockin
+description: >
+  Rotation periods are integer multiples of the linear sweep period
+  (32 channels x (10 ms dwell + 0.25 ms tune) = 0.328 s), so an open-loop
+  sweep can phase-lock and never see some emitters.
+duration_s: 40
+emitters:
+  coastal: 4
+  acquisition: 2
+overrides:
+  coastal:
+    scan_period_s: {choice: [2.296, 2.624, 3.28, 3.608]}
+  acquisition:
+    scan_period_s: {choice: [1.968, 2.952]}

@@ -1,0 +1,11 @@
+name: S5_popup
+description: Threats switch on mid-mission; tests re-exploration of a non-stationary spectrum.
+duration_s: 40
+emitters:
+  surveillance: 3
+  coastal: 3
+  acquisition: 2
+popups:
+  fire_control: 3
+  mfr: 2
+popup_window: [0.25, 0.7]   # switch-on time as a fraction of the mission

@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+data/
+runs/
+checkpoints/
+results/
+*.onnx
+node_modules/
+dashboard/web/dist/
+.pytest_cache/
+.ruff_cache/

@@ -1,0 +1,7 @@
+name: S4_agile_lpi
+description: Frequency-agile and low-probability-of-intercept emitters.
+duration_s: 40
+emitters:
+  agile: 5
+  lpi: 4
+  coastal: 2

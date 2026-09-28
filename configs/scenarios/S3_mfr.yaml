@@ -1,0 +1,7 @@
+name: S3_mfr
+description: Multi-function radars switching search/acquisition/track modes.
+duration_s: 40
+emitters:
+  mfr: 6
+  surveillance: 2
+  coastal: 2
