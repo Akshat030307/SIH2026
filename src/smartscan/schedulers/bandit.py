@@ -131,8 +131,13 @@ class Thompson(Bandit):
 BANDITS = {"ucb1": UCB1, "ducb": DiscountedUCB, "swucb": SlidingWindowUCB, "thompson": Thompson}
 
 
-def novelty_reward(touched, max_threat: float = 5.0) -> float:
-    """Exploration payoff of one dwell, in [0, 1]."""
+def novelty_reward(touched, max_threat: float = 5.0, unlocked_weight: float = 0.0) -> float:
+    """Exploration payoff of one dwell, in [0, 1].
+
+    Discovering a new emitter is the main payoff. Re-seeing a known but
+    unlocked emitter is worth ``unlocked_weight`` (0 in the smart scheduler,
+    whose acquisition mode already covers those; > 0 for the stand-alone bandit).
+    """
     r = 0.0
     for tr, is_new, n in touched:
         if n < 2:
@@ -140,8 +145,8 @@ def novelty_reward(touched, max_threat: float = 5.0) -> float:
         w = infer_threat(tr) / max_threat
         if is_new:
             r += 0.6 + 0.4 * w
-        elif not tr.locked:
-            r += 0.3 + 0.3 * w
+        elif not tr.locked and unlocked_weight > 0 and getattr(tr, "_dirty", False):
+            r += unlocked_weight * (0.5 + 0.5 * w)
     return float(min(r, 1.0))
 
 
@@ -165,5 +170,5 @@ class BanditScheduler(Scheduler):
         assign, touched = self.tracker.update(t_listen, t_end, channel, pdws)
         for tr, _, _ in touched:
             self.tracker.refresh_estimate(tr)
-        self.bandit.update(channel, novelty_reward(touched))
+        self.bandit.update(channel, novelty_reward(touched, unlocked_weight=0.5))
         return assign

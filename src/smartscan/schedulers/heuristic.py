@@ -47,7 +47,7 @@ class SmartHeuristic(Scheduler):
 
     def __init__(self, bandit: str = "ducb", explore_dwell_s: float = 0.01, n_need: int = 4,
                  guard_s: float = 0.0015, sigma_k: float = 2.5, max_window_s: float = 0.06,
-                 acq_budget: float = 0.6, **bandit_kw):
+                 acq_budget: float = 0.5, **bandit_kw):
         self.bandit_kind = bandit
         self.bandit_kw = bandit_kw
         self.explore_dwell_s = explore_dwell_s

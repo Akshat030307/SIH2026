@@ -213,7 +213,8 @@ class Tracker:
             if dp >= 1.0:
                 continue
             if rf < tr.rf_min - self.rf_gate or rf > tr.rf_max + self.rf_gate:
-                dr = 0.6 if tr.agile else 1.0
+                # a carrier jump with matching AOA/PW is most likely a frequency hop of the same emitter
+                dr = 0.2 if tr.agile else 0.5
             else:
                 dr = 0.0
             cost = max(da, dp) + dr
