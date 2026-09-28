@@ -170,5 +170,15 @@ def build_world(scenario: str | dict, seed: int = 0, library: dict | None = None
     for cls_name, n in (sc.get("popups") or {}).items():
         add(cls_name, n, popup=True)
 
+    # co-located sites: several radars share (almost) the same bearing, so AOA can't separate them
+    n_sites = int(sc.get("sites", 0))
+    if n_sites > 0:
+        site_brg = rng.uniform(0, 360, n_sites)
+        site_rng = rng.uniform(40e3, 120e3, n_sites)
+        for e in emitters:
+            k = int(rng.integers(n_sites))
+            e.bearing_deg = float((site_brg[k] + rng.normal(0, 0.3)) % 360)
+            e.range_m = float(site_rng[k] * rng.uniform(0.97, 1.03))
+
     return World(name=sc.get("name", "custom"), duration=duration, receiver=receiver,
                  emitters=emitters, seed=seed, meta={"description": sc.get("description", "")})

@@ -1,0 +1,14 @@
+name: S7_colocated
+description: >
+  Integrated air-defence sites: search, acquisition, fire-control and MFR
+  radars co-located at three sites, so AOA can't separate them. The hardest
+  deinterleaving case; PRI/time structure is needed.
+duration_s: 40
+sites: 3
+emitters:
+  surveillance: 3
+  acquisition: 6
+  coastal: 3
+  mfr: 3
+  fire_control: 3
+  agile: 3
