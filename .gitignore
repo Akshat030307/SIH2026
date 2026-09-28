@@ -10,3 +10,4 @@ node_modules/
 dashboard/web/dist/
 .pytest_cache/
 .ruff_cache/
+dashboard/web/node_modules/
