@@ -10,3 +10,5 @@ dashboard/web/dist/
 .pytest_cache/
 .ruff_cache/
 dashboard/web/node_modules/
+checkpoints/run1_unprotected_demos/*.pt
+checkpoints/run2_protected_partial/

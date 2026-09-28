@@ -37,7 +37,8 @@ def export_onnx(ckpt=DEFAULT_CKPT):
     from onnxruntime.quantization import QuantType, quantize_dynamic
 
     int8 = OUT / "d3qn_int8.onnx"
-    quantize_dynamic(str(fp32), str(int8), weight_type=QuantType.QInt8)
+    # per-channel scales: per-tensor INT8 flipped a third of greedy actions on this small network
+    quantize_dynamic(str(fp32), str(int8), weight_type=QuantType.QInt8, per_channel=True)
     return net, fp32, int8
 
 
@@ -135,7 +136,11 @@ def main():
     md = ["# Edge inference benchmark", "", "Model sizes: " + ", ".join(f"{k} {v:.0f} KiB" for k, v in sizes.items()),
           "", f"FP32 vs INT8 greedy-action agreement on {len(states)} recorded states: **{agree:.3f}**", "",
           "## Latency per decision (µs)", "", md_table(lat, index=False), "",
-          "## Scheduling metrics, FP32 vs INT8 (seed 150)", "", md_table(met, index=False), ""]
+          "## Scheduling metrics, FP32 vs INT8 (seed 150)", "", md_table(met, index=False), "",
+          "**Recommendation:** deploy the FP32 ONNX policy. On this ~150k-parameter network, dynamic INT8",
+          "is slower on CPU (quantize/dequantize overhead dominates) and changes a noticeable share of greedy",
+          "actions. The decision loop is dominated by Python feature extraction, which is the part to port",
+          "to C++/FPGA for microsecond-level budgets.", ""]
     (out / "summary.md").write_text("\n".join(md))
     print("\n".join(md))
 
