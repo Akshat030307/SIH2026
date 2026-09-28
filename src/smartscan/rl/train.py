@@ -34,7 +34,7 @@ def _make(rank: int, seed: int, scenarios):
     return f
 
 
-def evaluate_policy(agent: D3QNAgent, scenarios, seeds=(500, 501)) -> dict:
+def evaluate_policy(agent: D3QNAgent, scenarios, seeds=(500,)) -> dict:
     """Greedy-policy validation on seeds disjoint from both training (0-99) and test (100+ in eval.py)."""
     from smartscan.rl.policy import D3QNScheduler
     from smartscan.runner import run_episode
@@ -53,9 +53,11 @@ def evaluate_policy(agent: D3QNAgent, scenarios, seeds=(500, 501)) -> dict:
 
 
 def train(steps=1_000_000, n_envs=12, demo_steps=120_000, pretrain=15_000, batch=256, eps0=0.05, eps1=0.01,
-          eval_every=100_000, seed=0, scenarios=DEFAULT_SCENARIOS, replay=400_000, updates_per_step=2):
+          eval_every=100_000, seed=0, scenarios=DEFAULT_SCENARIOS, replay=400_000, updates_per_step=1, threads=None):
     from torch.utils.tensorboard import SummaryWriter
 
+    if threads:
+        torch.set_num_threads(threads)
     CKPT_DIR.mkdir(parents=True, exist_ok=True)
     load_behaviour()  # fit once in the parent before workers start
     run = ROOT / "runs" / time.strftime("d3qn_%Y%m%d_%H%M%S")
@@ -168,8 +170,12 @@ def main(argv=None):
     ap.add_argument("--pretrain", type=int, default=15_000)
     ap.add_argument("--eval-every", type=int, default=100_000)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--batch", type=int, default=256)
+    ap.add_argument("--updates-per-step", type=int, default=1)
+    ap.add_argument("--threads", type=int, default=None, help="torch CPU threads for the learner")
     a = ap.parse_args(argv)
-    train(a.steps, a.envs, a.demo_steps, a.pretrain, eval_every=a.eval_every, seed=a.seed)
+    train(a.steps, a.envs, a.demo_steps, a.pretrain, batch=a.batch, eval_every=a.eval_every, seed=a.seed,
+          updates_per_step=a.updates_per_step, threads=a.threads)
 
 
 if __name__ == "__main__":

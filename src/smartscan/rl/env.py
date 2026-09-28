@@ -32,6 +32,7 @@ class RewardCfg:
     beta: float = 0.5
     gamma_err: float = 2.0  # per second of timing error
     delta_tune: float = 0.002
+    scale: float = 10.0  # keeps Q-values on the scale of the DQfD margin (0.8)
 
 
 class SmartScanEnv(gym.Env):
@@ -99,4 +100,4 @@ class SmartScanEnv(gym.Env):
                 r -= c.gamma_err * min(abs(float(true["toa"].min()) - act.intent.predicted_time), 0.05)
         if res.retuned:
             r -= c.delta_tune
-        return float(r)
+        return float(c.scale * r)
