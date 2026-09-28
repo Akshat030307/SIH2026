@@ -28,6 +28,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from smartscan.sim.world import ROOT
+from smartscan.util import md_table
 
 CKPT = ROOT / "checkpoints" / "deinterleaver.pt"
 WINDOW = 256
@@ -207,7 +208,7 @@ def evaluate(seeds=range(1000, 1010), scenarios=("S7_colocated", "S2_dense")) ->
     df.to_csv(out / "results.csv", index=False)
     summ = df.groupby(["scenario", "method"])[["ari", "ami", "v_measure", "homogeneity", "completeness", "n_true",
                                                 "n_pred", "sec"]].mean().round(3)
-    (out / "summary.md").write_text("# Deinterleaving (held-out seeds)\n\n" + summ.to_markdown() + "\n")
+    (out / "summary.md").write_text("# Deinterleaving (held-out seeds)\n\n" + md_table(summ) + "\n")
     print(summ)
     return summ
 

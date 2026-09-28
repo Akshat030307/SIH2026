@@ -16,8 +16,6 @@ Implementations:
 
 from __future__ import annotations
 
-from collections import defaultdict
-
 import numpy as np
 
 from smartscan.predict.symbols import N_SYMBOLS
@@ -66,14 +64,14 @@ class NGram(Predictor):
         self.name = f"ngram{order}"
 
     def fit(self, seqs):
-        self.counts = [defaultdict(lambda: np.zeros(N_SYMBOLS)) for _ in range(self.order + 1)]
+        self.counts: list[dict] = [{} for _ in range(self.order + 1)]
         for s in seqs:
             for t in range(len(s)):
                 for k in range(self.order + 1):
                     if t - k < 0:
                         break
-                    ctx = tuple(s[t - k:t])
-                    self.counts[k][ctx][s[t]] += 1
+                    ctx = tuple(int(x) for x in s[t - k:t])
+                    self.counts[k].setdefault(ctx, np.zeros(N_SYMBOLS))[s[t]] += 1
         return self
 
     def predict_proba(self, history):
@@ -81,7 +79,7 @@ class NGram(Predictor):
         for k in range(self.order + 1):  # interpolate from short to long contexts
             if k > len(history):
                 break
-            ctx = tuple(history[len(history) - k:]) if k else ()
+            ctx = tuple(int(x) for x in history[len(history) - k:]) if k else ()
             c = self.counts[k].get(ctx)
             if c is None or c.sum() == 0:
                 continue

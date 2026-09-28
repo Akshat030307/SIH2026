@@ -212,11 +212,16 @@ class Tracker:
             dp = abs(lpw - tr.log_pw) / self.logpw_gate
             if dp >= 1.0:
                 continue
-            if rf < tr.rf_min - self.rf_gate or rf > tr.rf_max + self.rf_gate:
-                # a carrier jump with matching AOA/PW is most likely a frequency hop of the same emitter
-                dr = 0.2 if tr.agile else 0.5
-            else:
+            gap = max(tr.rf_min - rf, rf - tr.rf_max, 0.0)
+            if gap <= self.rf_gate:
                 dr = 0.0
+            elif tr.agile:
+                # known frequency-agile emitter: hops within a plausible agility span are expected
+                dr = 0.2 if gap <= 600e6 else 1.0
+            else:
+                # a small jump with matching AOA/PW may be the first observed hop; a large one is
+                # most likely a different, co-located radar
+                dr = 0.5 if gap <= 150e6 else 1.0
             cost = max(da, dp) + dr
             if cost < best_cost:
                 best, best_cost = tr, cost

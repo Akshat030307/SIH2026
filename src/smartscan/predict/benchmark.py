@@ -23,6 +23,7 @@ import pandas as pd
 from smartscan.predict.models import NGram, Persistence, SpectralPSR, Unigram
 from smartscan.predict.symbols import N_SYMBOLS, emitter_sequences
 from smartscan.sim.world import ROOT
+from smartscan.util import md_table
 
 
 def symbol_to_mode(train) -> np.ndarray:
@@ -91,7 +92,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     df.to_csv(out / "results.csv", index=False)
     (out / "summary.md").write_text("# MFR behaviour prediction (held-out seeds)\n\n"
-                                    + df.round(3).to_markdown(index=False) + "\n")
+                                    + md_table(df.round(3), index=False) + "\n")
     print(df.round(3).to_string(index=False))
 
 

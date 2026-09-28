@@ -17,6 +17,17 @@ DESCRIPTIONS = {
 }
 
 
+# component ablations of the smart heuristic
+ABLATIONS = {
+    "smart-no_lock": dict(use_lock=False),
+    "smart-no_acquire": dict(use_acquisition=False),
+    "smart-no_lock_no_acquire": dict(use_lock=False, use_acquisition=False),
+    "smart-sweep_explore": dict(explore="sweep", jitter=False),
+    "smart-random_explore": dict(explore="random"),
+    "smart-no_jitter": dict(jitter=False),
+}
+
+
 def make_scheduler(name: str, **kw) -> Scheduler:
     if name == "sweep":
         return LinearSweep(**kw)
@@ -30,6 +41,10 @@ def make_scheduler(name: str, **kw) -> Scheduler:
         return BanditScheduler(name.split("_", 1)[1], **kw)
     if name == "smart":
         return SmartHeuristic(**kw)
+    if name in ABLATIONS:
+        sched = SmartHeuristic(**ABLATIONS[name], **kw)
+        sched.name = name
+        return sched
     if name.startswith("smart_"):  # smart_<bandit kind>
         return SmartHeuristic(bandit=name.split("_", 1)[1], **kw)
     if name == "d3qn":

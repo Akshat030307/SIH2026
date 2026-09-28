@@ -47,8 +47,11 @@ class SmartHeuristic(Scheduler):
 
     def __init__(self, bandit: str = "ducb", explore_dwell_s: float = 0.01, n_need: int = 4,
                  guard_s: float = 0.0015, sigma_k: float = 2.5, max_window_s: float = 0.06,
-                 acq_budget: float = 0.5, **bandit_kw):
+                 acq_budget: float = 0.5, use_lock: bool = True, use_acquisition: bool = True,
+                 explore: str = "bandit", jitter: bool = True, **bandit_kw):
+        """``use_lock`` / ``use_acquisition`` / ``explore`` / ``jitter`` exist for ablations."""
         self.bandit_kind = bandit
+        self.use_lock, self.use_acquisition, self.explore, self.jitter = use_lock, use_acquisition, explore, jitter
         self.bandit_kw = bandit_kw
         self.explore_dwell_s = explore_dwell_s
         self.n_need = n_need
@@ -82,6 +85,8 @@ class SmartHeuristic(Scheduler):
 
     def windows(self, t: float) -> list[Window]:
         out = []
+        if not self.use_lock:
+            return out
         for tr in self.tracker.tracks.values():
             if tr.est is None:
                 continue
@@ -125,16 +130,24 @@ class SmartHeuristic(Scheduler):
             cap = min(self.explore_dwell_s, 0.5 * ri, slack)
             ok = np.flatnonzero(self.dwells <= cap + 1e-12)
             return Action(ch, int(ok[-1]) if len(ok) else 0, reason="acquire")
-        cap = min(self.explore_dwell_s * self.rng.choice([0.5, 1.0, 1.0, 2.0]), slack)
+        scale = self.rng.choice([0.5, 1.0, 1.0, 2.0]) if self.jitter else 1.0
+        cap = min(self.explore_dwell_s * scale, slack)
         ok = np.flatnonzero(self.dwells <= cap + 1e-12)
         d = int(ok[-1]) if len(ok) else 0
-        return Action(self.bandit.select(), d, reason="explore")
+        if self.explore == "sweep":
+            self._sweep_k = getattr(self, "_sweep_k", -1) + 1
+            ch = self._sweep_k % self.rx.n_channels
+        elif self.explore == "random":
+            ch = int(self.rng.integers(self.rx.n_channels))
+        else:
+            ch = self.bandit.select()
+        return Action(ch, d, reason="explore")
 
     def _acquisition_channel(self, t: float):
         """Most overdue channel holding an unlocked track, if within the time budget."""
         while self._acq_log and self._acq_log[0][0] < t - 2.0:
             self._acq_time -= self._acq_log.popleft()[1]
-        if self._acq_time > self.acq_budget * 2.0:
+        if not self.use_acquisition or self._acq_time > self.acq_budget * 2.0:
             return None
         best, best_score = None, 1.0
         for tr in self.tracker.tracks.values():
