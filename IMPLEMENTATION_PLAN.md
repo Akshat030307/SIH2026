@@ -3,6 +3,13 @@
 Source: `SIH26055 Electronic Warfare Smart Scan.pdf` (analysis & framework document).
 Goal: a **closed-loop, ML-driven receiver scheduler** that decides *which frequency band to tune to next* and *how long to dwell*, with **no prior intelligence** about emitters, and that measurably beats open-loop (sequential) scanning on the SIH figures of merit.
 
+> **Implementation status:** M0–M9 are implemented. See `README.md` for results and how to reproduce them.
+> Differences from this plan:
+> - The package lives in `src/smartscan/`.
+> - The dashboard is FastAPI + React, not Streamlit.
+> - Scenario S7 (co-located sites) was added.
+> - The Turing dataset needs a Hugging Face token (loader included).
+
 ---
 
 ## 1. What we are actually building

@@ -307,7 +307,9 @@ class Tracker:
 
     def register_miss(self, tr: Track, max_misses: int = 2) -> None:
         tr.misses += 1
-        if tr.misses >= max_misses:
+        # a hopping emitter can be on another channel during a correctly predicted illumination,
+        # so a miss is weaker evidence against its lock
+        if tr.misses >= (2 * max_misses if tr.agile else max_misses):
             # probably a mode change or a wrong (multiple) period: restart from recent evidence
             tr.est = None
             keep = [c for c in tr.chunks if c[1] >= tr.last_seen - 1.0]
