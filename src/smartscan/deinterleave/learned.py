@@ -116,13 +116,15 @@ def embed(model: PulseEncoder, pdws: np.ndarray, window: int = WINDOW, stride: i
     return z / np.maximum(np.linalg.norm(z, axis=1, keepdims=True), 1e-9)
 
 
-def learned_deinterleave(model, pdws: np.ndarray, min_cluster_size: int = 15, w_static: float = 0.5) -> np.ndarray:
+def learned_deinterleave(model, pdws: np.ndarray, min_cluster_size: int = 40, w_emb: float = 8.0,
+                         w_static: float = 0.25) -> np.ndarray:
+    """HDBSCAN on [w_emb·embedding, w_static·scaled static features] (weights tuned on validation seeds 2000+)."""
     import hdbscan
 
     from smartscan.deinterleave.classical import _scaled
 
     z = embed(model, pdws)
-    feats = np.concatenate([z * 4.0, w_static * _scaled(pdws) / 4.0], axis=1)
+    feats = np.concatenate([z * w_emb, w_static * _scaled(pdws) / 4.0], axis=1)
     return hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, min_samples=5).fit_predict(feats)
 
 
