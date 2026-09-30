@@ -1,4 +1,4 @@
-# Smart Scan: ML-driven ESM receiver scheduling (SIH26055)
+# ARES: Autonomous Radar ESM Scheduling System (SIH26055)
 
 A closed-loop scheduler for a narrowband scanning ESM/RWR receiver. It decides
 **which frequency band to tune to next and how long to listen**, with no
@@ -9,6 +9,35 @@ and places its dwells there.
 Everything runs against a physics-based RF simulator whose ground truth
 scores the SIH figures of merit: probability of detection, intercept rate,
 intercept time error, Pfa, correct predictions, and reward convergence.
+
+---
+
+## System Dashboard & Telemetry
+
+ARES features an operational electronic warfare dashboard with real-time spectrum waterfalls, multi-scheduler comparative telemetry, and a comprehensive held-out benchmark evaluation suite.
+
+### 1. Real-Time Multi-Scheduler Comparative Mission View
+Interactive mission control deck and live spectrogram waterfalls executing identical RF environments side-by-side across legacy open-loop sweep, cognitive heuristic, and deep reinforcement learning (D3QN) policies:
+
+<p align="center">
+  <img src="docs/images/ares_live_mission.png" alt="ARES Live Mission Dashboard" width="100%" />
+</p>
+
+### 2. Multi-Policy Spectrogram Waterfalls & Tracking Telemetry
+Real-time dwell execution showing exploration (blue), acquisition (amber), and locked main-beam tracking (green), alongside live threat-weighted $P_d$ trajectories and cognitive emitter tracking tables:
+
+<p align="center">
+  <img src="docs/images/ares_waterfall_telemetry.png" alt="ARES Telemetry and Tracking Dashboard" width="100%" />
+</p>
+
+### 3. Held-out Benchmark Suite & Comparative Figures of Merit
+Rigorous side-by-side evaluation across 7 benchmark scenarios and 35 held-out Monte Carlo test seeds with executive figures of merit, grouped scenario bar charts, and $\Delta$ vs sweep gain badges:
+
+<p align="center">
+  <img src="docs/images/ares_benchmark_deck.png" alt="ARES Held-out Benchmark Suite" width="100%" />
+</p>
+
+---
 
 <!-- RESULTS:START -->
 ## Results
