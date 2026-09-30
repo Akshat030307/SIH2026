@@ -62,7 +62,7 @@ export default function App() {
           </div>
           <div className="brand-text">
             <div className="brand-title-row">
-              <span className="brand-name">JONATHAN</span>
+              <span className="brand-name">ARES</span>
               <span className="brand-tag">ESM // SIH26055</span>
             </div>
             <p className="brand-sub">Autonomous ESM Receiver Scheduling System</p>

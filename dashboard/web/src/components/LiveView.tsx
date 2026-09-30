@@ -317,7 +317,7 @@ export function LiveView({ scenarios, schedulers }: { scenarios: ScenarioInfo[];
             <div className="hero-icon-wrap">
               <SparklesIcon className="hero-icon" />
             </div>
-            <h2>Jonathan: Autonomous ESM Receiver Simulation</h2>
+            <h2>ARES: Autonomous ESM Receiver Simulation</h2>
             <p>
               Compare agile machine learning scheduling strategies against legacy sweeps in real-time.
               Both schedulers face identical RF environments, ground-truth pulse trains, and main-beam illuminations.
