@@ -35,7 +35,7 @@ from smartscan.schedulers.registry import DESCRIPTIONS, make_scheduler
 from smartscan.sim.engine import RFEngine
 from smartscan.sim.world import ROOT, build_world, list_scenarios, load_scenario
 
-app = FastAPI(title="Smart Scan EW")
+app = FastAPI(title="Jonathan EW")
 
 
 def _warm_up():

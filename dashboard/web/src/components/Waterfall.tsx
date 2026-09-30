@@ -57,8 +57,8 @@ export function Waterfall({ name, t, window, channels, dwells, events, emitters 
     const ctx = cv.getContext("2d")!;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    // Deep modern radar screen background
-    ctx.fillStyle = "#0c1017";
+    // Pure black radar screen background
+    ctx.fillStyle = "#000000";
     ctx.fillRect(0, 0, W, H);
 
     const left = 44;
