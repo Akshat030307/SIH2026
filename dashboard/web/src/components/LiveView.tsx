@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { DoneMsg, Dwell, FrameMsg, GtEvent, InitMsg, Metrics, ScenarioInfo, SchedulerInfo, TrackRow } from "../types";
-import { CLASS_COLORS, REASON_COLORS, REASON_LABELS } from "../theme";
+import { CLASS_COLORS, REASON_COLORS, REASON_LABELS, SCHEDULER_TAGS } from "../theme";
 import { Waterfall } from "./Waterfall";
 import { Legend, LineChart } from "./Charts";
+import { LockIcon, PauseIcon, PlayIcon, RestartIcon, SparklesIcon } from "./Icons";
+import { createClientSimulation } from "../clientSim";
 
 const WINDOW_S = 6;
 
@@ -18,6 +20,13 @@ interface RunState {
 }
 
 const fmt = (v: number | null | undefined, d = 3) => (v == null || Number.isNaN(v) ? "–" : v.toFixed(d));
+const fmtClock = (sec: number) => {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m.toString().padStart(2, "0")}:${s.toFixed(1).padStart(4, "0")}s`;
+};
+
+const PRESET_SPEEDS = [1, 2, 4, 8, 16];
 
 export function LiveView({ scenarios, schedulers }: { scenarios: ScenarioInfo[]; schedulers: SchedulerInfo[] }) {
   const [scenario, setScenario] = useState("S6_lockin");
@@ -27,15 +36,19 @@ export function LiveView({ scenarios, schedulers }: { scenarios: ScenarioInfo[];
   const [paused, setPaused] = useState(false);
   const [run, setRun] = useState<RunState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isDemo, setIsDemo] = useState(false);
   const ws = useRef<WebSocket | null>(null);
+  const simDriver = useRef<{ setSpeed: (s: number) => void; pause: () => void; resume: () => void; stop: () => void } | null>(null);
 
   useEffect(() => {
-    if (schedulers.some((s) => s.name === "d3qn")) setChosen(["sweep", "smart", "d3qn"]);
+    if (schedulers.some((s) => s.name === "d3qn") && !chosen.includes("d3qn")) {
+      setChosen(["sweep", "smart", "d3qn"]);
+    }
   }, [schedulers]);
 
   useEffect(() => () => ws.current?.close(), []);
 
-  // demo presets: ?autorun=S6_lockin&schedulers=sweep,smart&speed=4&seed=100
+  // Demo URL presets: ?autorun=S6_lockin&schedulers=sweep,smart&speed=4&seed=100
   const autorun = useRef(new URLSearchParams(location.search));
   useEffect(() => {
     const q = autorun.current;
@@ -55,205 +68,470 @@ export function LiveView({ scenarios, schedulers }: { scenarios: ScenarioInfo[];
     start(cfg);
   }, [scenarios, schedulers]);
 
-  const start = (cfg = { scenario, seed, schedulers: chosen, speed }) => {
+  const handleFrame = (msg: FrameMsg) => {
+    setRun((r) => {
+      if (!r) return r;
+      const cut = msg.t - WINDOW_S - 0.5;
+      const dwells: Record<string, Dwell[]> = {};
+      const history = { ...r.history };
+      const metrics = { ...r.metrics };
+      const tracks = { ...r.tracks };
+      for (const [name, data] of Object.entries(msg.runs)) {
+        dwells[name] = (r.dwells[name] ?? []).filter((d) => d[1] >= cut).concat(data.dwells);
+        metrics[name] = data.metrics;
+        const pw = data.metrics.pd_weighted;
+        if (pw != null) history[name] = [...(history[name] ?? []), [msg.t, pw]];
+        if (data.tracks) tracks[name] = data.tracks;
+      }
+      const events = r.events.filter((e) => e[2] >= cut).concat(msg.events);
+      return { ...r, t: msg.t, dwells, events, metrics, history, tracks };
+    });
+  };
+
+  const start = (cfg = { scenario, seed, schedulers: chosen, speed }, forceDemo = false) => {
     ws.current?.close();
+    simDriver.current?.stop();
     setError(null);
     setPaused(false);
+
+    if (forceDemo) {
+      setIsDemo(true);
+      const empty = Object.fromEntries(cfg.schedulers.map((s) => [s, []]));
+      simDriver.current = createClientSimulation(
+        { scenario: cfg.scenario, seed: cfg.seed, schedulers: cfg.schedulers, speed: cfg.speed },
+        (initMsg) => {
+          setRun({
+            init: initMsg,
+            t: 0,
+            dwells: { ...empty },
+            events: [],
+            metrics: {},
+            history: { ...empty },
+            tracks: {},
+            done: false,
+          });
+        },
+        (frameMsg) => handleFrame(frameMsg),
+        (doneMsg) => {
+          setRun((r) => (r ? { ...r, done: true, metrics: { ...r.metrics, ...doneMsg.final } } : r));
+        }
+      );
+      return;
+    }
+
+    setIsDemo(false);
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const sock = new WebSocket(`${proto}://${location.host}/api/run`);
     ws.current = sock;
     sock.onopen = () => sock.send(JSON.stringify({ ...cfg, frame_s: 0.1 }));
-    sock.onerror = () => setError("Connection to the simulation server failed. Is `uvicorn smartscan.server:app` running?");
+    sock.onerror = () => {
+      // Gracefully switch to interactive client-side simulation when backend is unreachable
+      setError("Backend server offline. Automatically switched to interactive client simulation engine.");
+      start(cfg, true);
+    };
     sock.onmessage = (ev) => {
       const msg = JSON.parse(ev.data) as InitMsg | FrameMsg | DoneMsg;
       if (msg.type === "init") {
         const empty = Object.fromEntries(msg.schedulers.map((s) => [s, []]));
-        setRun({ init: msg, t: 0, dwells: { ...empty }, events: [], metrics: {}, history: { ...empty }, tracks: {}, done: false });
-      } else if (msg.type === "frame") {
-        setRun((r) => {
-          if (!r) return r;
-          const cut = msg.t - WINDOW_S - 0.5;
-          const dwells: Record<string, Dwell[]> = {};
-          const history = { ...r.history };
-          const metrics = { ...r.metrics };
-          const tracks = { ...r.tracks };
-          for (const [name, data] of Object.entries(msg.runs)) {
-            dwells[name] = r.dwells[name].filter((d) => d[1] >= cut).concat(data.dwells);
-            metrics[name] = data.metrics;
-            const pw = data.metrics.pd_weighted;
-            if (pw != null) history[name] = [...history[name], [msg.t, pw]];
-            if (data.tracks) tracks[name] = data.tracks;
-          }
-          const events = r.events.filter((e) => e[2] >= cut).concat(msg.events);
-          return { ...r, t: msg.t, dwells, events, metrics, history, tracks };
+        setRun({
+          init: msg,
+          t: 0,
+          dwells: { ...empty },
+          events: [],
+          metrics: {},
+          history: { ...empty },
+          tracks: {},
+          done: false,
         });
+      } else if (msg.type === "frame") {
+        handleFrame(msg);
       } else if (msg.type === "done") {
         setRun((r) => (r ? { ...r, done: true, metrics: { ...r.metrics, ...msg.final } } : r));
       }
     };
   };
 
-  const control = (cmd: object) => ws.current?.readyState === WebSocket.OPEN && ws.current.send(JSON.stringify(cmd));
+  const control = (cmd: { cmd: string; value?: number }) => {
+    if (isDemo && simDriver.current) {
+      if (cmd.cmd === "speed" && cmd.value != null) simDriver.current.setSpeed(cmd.value);
+      else if (cmd.cmd === "pause") simDriver.current.pause();
+      else if (cmd.cmd === "resume") simDriver.current.resume();
+      else if (cmd.cmd === "stop") simDriver.current.stop();
+      return;
+    }
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify(cmd));
+    }
+  };
 
   const sc = scenarios.find((s) => s.name === scenario);
   const trackOwner = run?.init.schedulers.find((s) => (run.tracks[s] ?? []).length > 0);
 
+  // Find leader (highest Threat-weighted Pd)
+  let leaderName: string | null = null;
+  let leaderScore = -1;
+  if (run && run.init.schedulers.length > 1) {
+    for (const name of run.init.schedulers) {
+      const score = run.metrics[name]?.pd_weighted ?? -1;
+      if (score > leaderScore && score > 0) {
+        leaderScore = score;
+        leaderName = name;
+      }
+    }
+  }
+
+  const isRunning = !!(run && !run.done);
+
+  // Keyboard shortcut listener (Space = pause/resume)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (["INPUT", "SELECT", "TEXTAREA"].includes((e.target as HTMLElement)?.tagName)) return;
+      if (e.code === "Space" && run && !run.done) {
+        e.preventDefault();
+        const next = !paused;
+        setPaused(next);
+        control({ cmd: next ? "pause" : "resume" });
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [run, paused]);
+
   return (
     <div className="live">
-      <section className="controls panel">
-        <label>
-          Scenario
-          <select value={scenario} onChange={(e) => setScenario(e.target.value)}>
-            {scenarios.map((s) => (
-              <option key={s.name} value={s.name}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Seed
-          <input type="number" value={seed} min={100} onChange={(e) => setSeed(Number(e.target.value))} />
-        </label>
-        <fieldset>
-          <legend>Schedulers (same world, side by side)</legend>
-          {schedulers.map((s) => (
-            <label key={s.name} className="check" title={s.description}>
-              <input
-                type="checkbox"
-                checked={chosen.includes(s.name)}
-                onChange={(e) =>
-                  setChosen((c) => (e.target.checked ? [...c, s.name] : c.filter((x) => x !== s.name)).slice(0, 4))
-                }
-              />
-              {s.name}
-            </label>
-          ))}
-        </fieldset>
-        <label>
-          Speed ×{speed}
-          <input
-            type="range"
-            min={0.5}
-            max={20}
-            step={0.5}
-            value={speed}
-            onChange={(e) => {
-              setSpeed(Number(e.target.value));
-              control({ cmd: "speed", value: Number(e.target.value) });
-            }}
-          />
-        </label>
-        <div className="buttons">
-          <button className="primary" onClick={() => start()} disabled={chosen.length === 0}>
-            {run && !run.done ? "Restart" : "Run mission"}
-          </button>
-          {run && !run.done && (
+      {/* Sleek Command Deck */}
+      <section className="command-deck panel">
+        <div className="command-row">
+          <div className="command-group">
+            <span className="field-label">Scenario</span>
+            <div className="select-wrap">
+              <select value={scenario} onChange={(e) => setScenario(e.target.value)} disabled={isRunning}>
+                {scenarios.map((s) => (
+                  <option key={s.name} value={s.name}>
+                    {s.name} ({s.duration}s)
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="command-group">
+            <span className="field-label">Schedulers ({chosen.length})</span>
+            <div className="scheduler-pills">
+              {schedulers.map((s) => {
+                const active = chosen.includes(s.name);
+                const tag = SCHEDULER_TAGS[s.name];
+                return (
+                  <button
+                    key={s.name}
+                    type="button"
+                    className={`pill-btn ${active ? "active" : ""}`}
+                    disabled={isRunning}
+                    onClick={() => {
+                      setChosen((c) =>
+                        active ? (c.length > 1 ? c.filter((x) => x !== s.name) : c) : [...c, s.name]
+                      );
+                    }}
+                    title={s.description}
+                  >
+                    <span className="pill-dot" style={{ background: active ? tag?.color ?? "var(--accent)" : "transparent" }} />
+                    <span className="pill-name">{s.name}</span>
+                    {tag && <span className="pill-badge">{tag.label}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="command-group compact">
+            <span className="field-label">Seed</span>
+            <input
+              type="number"
+              className="number-input"
+              value={seed}
+              min={1}
+              disabled={isRunning}
+              onChange={(e) => setSeed(Number(e.target.value))}
+            />
+          </div>
+
+          <div className="command-group speed-group">
+            <span className="field-label">Speed</span>
+            <div className="speed-segmented">
+              {PRESET_SPEEDS.map((sp) => (
+                <button
+                  key={sp}
+                  type="button"
+                  className={`speed-pill ${speed === sp ? "active" : ""}`}
+                  onClick={() => {
+                    setSpeed(sp);
+                    control({ cmd: "speed", value: sp });
+                  }}
+                >
+                  {sp}×
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="command-actions">
+            {isDemo && <span className="engine-badge demo" title="Running in high-fidelity client simulation mode">⚡ Demo Sim</span>}
             <button
-              onClick={() => {
-                control({ cmd: paused ? "resume" : "pause" });
-                setPaused(!paused);
-              }}
+              className="btn btn-primary"
+              onClick={() => start()}
+              disabled={chosen.length === 0}
             >
-              {paused ? "Resume" : "Pause"}
+              {isRunning ? <RestartIcon className="btn-icon" /> : <PlayIcon className="btn-icon" />}
+              <span>{run && !run.done ? "Restart" : "Run Mission"}</span>
             </button>
-          )}
+            {isRunning && (
+              <button
+                className="btn btn-secondary"
+                onClick={() => {
+                  control({ cmd: paused ? "resume" : "pause" });
+                  setPaused(!paused);
+                }}
+                title="Press Space to toggle"
+              >
+                {paused ? <PlayIcon className="btn-icon" /> : <PauseIcon className="btn-icon" />}
+                <span>{paused ? "Resume" : "Pause"}</span>
+              </button>
+            )}
+          </div>
         </div>
-        {sc && <p className="desc">{sc.description}</p>}
-        {error && <p className="error">{error}</p>}
+
+        {sc && (
+          <div className="scenario-brief">
+            <span className="brief-tag">Mission Brief:</span>
+            <span className="brief-desc">{sc.description}</span>
+          </div>
+        )}
+
+        {error && <div className="error-alert">{error}</div>}
       </section>
 
+      {/* Ready / Empty Mission State */}
       {!run && (
-        <section className="panel empty">
-          <h2>Ready</h2>
-          <p>
-            Pick a scenario and two or more schedulers, then press <b>Run mission</b>. Each scheduler drives its own
-            receiver through an identical radar environment. The waterfalls show where each receiver listened
-            (filled blocks) against every main-beam illumination that reached it (outlines: green = intercepted, red =
-            missed).
-          </p>
-          <p className="hint">Try S6_lockin: an open-loop sweep phase-locks with the radars and sees almost nothing.</p>
+        <section className="panel empty-hero">
+          <div className="hero-content">
+            <div className="hero-icon-wrap">
+              <SparklesIcon className="hero-icon" />
+            </div>
+            <h2>Autonomous ESM Receiver Simulation</h2>
+            <p>
+              Compare agile machine learning scheduling strategies against legacy sweeps in real-time.
+              Both schedulers face identical RF environments, ground-truth pulse trains, and main-beam illuminations.
+            </p>
+            <div className="hero-presets">
+              <span className="presets-title">Quick Scenarios (Click to Launch):</span>
+              <div className="preset-cards">
+                <div
+                  className={`preset-card ${scenario === "S6_lockin" ? "selected" : ""}`}
+                  onClick={() => {
+                    setScenario("S6_lockin");
+                    start({ scenario: "S6_lockin", seed, schedulers: chosen, speed });
+                  }}
+                >
+                  <div className="preset-name">S6 Phase-Locking Trap</div>
+                  <div className="preset-hint">Legacy sweeps lock out; cognitive tracker achieves &gt;90% Pd.</div>
+                </div>
+                <div
+                  className={`preset-card ${scenario === "S3_mfr" ? "selected" : ""}`}
+                  onClick={() => {
+                    setScenario("S3_mfr");
+                    start({ scenario: "S3_mfr", seed, schedulers: chosen, speed });
+                  }}
+                >
+                  <div className="preset-name">S3 Multi-Function Radar</div>
+                  <div className="preset-hint">Search, acquisition &amp; track mode switches tested.</div>
+                </div>
+                <div
+                  className={`preset-card ${scenario === "S5_popup" ? "selected" : ""}`}
+                  onClick={() => {
+                    setScenario("S5_popup");
+                    start({ scenario: "S5_popup", seed, schedulers: chosen, speed });
+                  }}
+                >
+                  <div className="preset-name">S5 Pop-up Threat Radars</div>
+                  <div className="preset-hint">Sudden emergence of high-priority fire control emitters.</div>
+                </div>
+              </div>
+            </div>
+          </div>
         </section>
       )}
 
+      {/* Active Run Telemetry & Schedulers */}
       {run && (
         <>
-          <section className="panel emitters">
-            <div className="row-head">
-              <h2>
-                {run.init.scenario} · t = {run.t.toFixed(1)} / {run.init.duration}s {run.done && <span className="tag">complete</span>}
-              </h2>
-              <div className="progress">
-                <div style={{ width: `${(100 * run.t) / run.init.duration}%` }} />
+          {/* Mission Progress & Emitters Ribbon */}
+          <section className="panel telemetry-ribbon">
+            <div className="telemetry-bar">
+              <div className="telemetry-info">
+                <span className="scenario-badge">{run.init.scenario}</span>
+                <span className="clock-digits">
+                  {fmtClock(run.t)} <span className="clock-total">/ {fmtClock(run.init.duration)}</span>
+                </span>
+                <span className="progress-percent">
+                  {((100 * run.t) / run.init.duration).toFixed(1)}%
+                </span>
+                <span className={`status-pill ${run.done ? "done" : paused ? "paused" : "live"}`}>
+                  <span className="status-dot" />
+                  {run.done ? "COMPLETE" : paused ? "PAUSED" : "TRANSMITTING"}
+                </span>
+              </div>
+              <div className="progress-track">
+                <div className="progress-fill" style={{ width: `${(100 * run.t) / run.init.duration}%` }} />
               </div>
             </div>
-            <div className="chips">
-              {run.init.emitters.map((e) => (
-                <span
-                  key={e.id}
-                  className="chip"
-                  style={{ borderColor: CLASS_COLORS[e.cls], opacity: run.t >= e.t_on ? 1 : 0.35 }}
-                  title={`${e.name}: ${e.rf_ghz} GHz, bearing ${e.bearing}°, ${e.range_km} km${e.period ? `, T=${e.period}s` : ""}${e.t_on > 0 ? `, on at ${e.t_on}s` : ""}`}
-                >
-                  <i style={{ background: CLASS_COLORS[e.cls] }} />
-                  {e.cls}
-                </span>
-              ))}
+
+            <div className="emitter-roster">
+              <div className="roster-label">Target Emitters ({run.init.emitters.length})</div>
+              <div className="roster-chips">
+                {run.init.emitters.map((e) => {
+                  const isActive = run.t >= e.t_on;
+                  return (
+                    <div
+                      key={e.id}
+                      className={`emitter-chip ${isActive ? "active" : "standby"}`}
+                      style={{ borderColor: isActive ? CLASS_COLORS[e.cls] : "var(--border)" }}
+                      title={`${e.name}: ${e.rf_ghz} GHz, Azimuth ${e.bearing}°, ${e.range_km} km${e.period ? `, Period ${e.period}s` : ""}${e.t_on > 0 ? `, Active at ${e.t_on}s` : ""}`}
+                    >
+                      <span className="chip-indicator" style={{ background: CLASS_COLORS[e.cls] }} />
+                      <span className="chip-class">{e.cls}</span>
+                      <span className="chip-rf">{e.rf_ghz}G</span>
+                      <span className="chip-bearing">∠{e.bearing.toFixed(0)}°</span>
+                      {e.period && <span className="chip-period">T={e.period.toFixed(2)}s</span>}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </section>
 
-          <section className="runs" style={{ gridTemplateColumns: `repeat(${Math.min(run.init.schedulers.length, 3)}, minmax(0, 1fr))` }}>
+          {/* Mission Debrief Banner when complete */}
+          {run.done && (
+            <section className="panel mission-debrief">
+              <div className="debrief-left">
+                <div className="debrief-badge">
+                  <SparklesIcon className="debrief-icon" /> Mission Complete
+                </div>
+                <div className="debrief-summary">
+                  {leaderName ? (
+                    <span>
+                      <b>{leaderName.toUpperCase()}</b> achieved top performance with{" "}
+                      <b className="debrief-metric">{((run.metrics[leaderName]?.pd_weighted ?? 0) * 100).toFixed(1)}%</b> Threat-Weighted Pd
+                      {run.metrics.sweep?.pd_weighted != null && leaderName !== "sweep" && (
+                        <span className="debrief-gain">
+                          {" "}(+{(((run.metrics[leaderName]?.pd_weighted ?? 0) - (run.metrics.sweep?.pd_weighted ?? 0)) * 100).toFixed(1)}% gain vs baseline sweep)
+                        </span>
+                      )}.
+                    </span>
+                  ) : (
+                    <span>All schedulers reached mission duration.</span>
+                  )}
+                </div>
+              </div>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => start()}>
+                <RestartIcon className="btn-icon" /> Replay Mission
+              </button>
+            </section>
+          )}
+
+          {/* Schedulers Side-by-Side View */}
+          <section
+            className="runs-grid"
+            style={{
+              gridTemplateColumns: `repeat(${
+                run.init.schedulers.length === 1
+                  ? 1
+                  : run.init.schedulers.length === 2 || run.init.schedulers.length === 4
+                  ? 2
+                  : 3
+              }, minmax(0, 1fr))`,
+            }}
+          >
             {run.init.schedulers.map((name) => {
               const m = run.metrics[name];
               const desc = schedulers.find((s) => s.name === name)?.description;
+              const tag = SCHEDULER_TAGS[name];
+              const isLeader = leaderName === name;
+
               return (
-                <article key={name} className="panel run">
-                  <header>
-                    <h3>{name}</h3>
-                    <span className="muted">{desc}</span>
+                <article key={name} className={`panel run-card ${isLeader ? "leader-card" : ""}`}>
+                  <header className="run-card-header">
+                    <div className="run-title-row">
+                      <div className="run-title-group">
+                        <h3 className="run-name">{name}</h3>
+                        {tag && <span className="run-tag">{tag.label}</span>}
+                      </div>
+                      {isLeader && (
+                        <span className="leader-badge">
+                          <SparklesIcon className="leader-icon" /> Leader
+                        </span>
+                      )}
+                    </div>
+                    <span className="run-desc">{desc}</span>
                   </header>
-                  <div className="kpis">
-                    <Kpi label="Pd" value={fmt(m?.pd)} />
-                    <Kpi label="Threat-wtd Pd" value={fmt(m?.pd_weighted)} strong />
-                    <Kpi label="Events caught" value={m ? `${m.events_intercepted}/${m.events_done}` : "–"} />
-                    <Kpi label="Emitters" value={m ? `${m.emitters_intercepted}/${run.init.emitters.length}` : "–"} />
-                    <Kpi label="Predicted dwells" value={m ? String(m.predicted_dwells) : "–"} />
-                    <Kpi label="Pfa" value={fmt(m?.pfa, 2)} />
+
+                  <div className="kpi-grid">
+                    <KpiCard label="Threat-wtd Pd" value={fmt(m?.pd_weighted)} highlight />
+                    <KpiCard label="Overall Pd" value={fmt(m?.pd)} />
+                    <KpiCard
+                      label="Caught"
+                      value={m ? `${m.events_intercepted}/${m.events_done}` : "–"}
+                      sub={m && m.events_done > 0 ? `${((100 * m.events_intercepted) / m.events_done).toFixed(0)}%` : undefined}
+                    />
+                    <KpiCard label="Emitters" value={m ? `${m.emitters_intercepted}/${run.init.emitters.length}` : "–"} />
+                    <KpiCard label="Pred Dwells" value={m ? String(m.predicted_dwells) : "–"} />
+                    <KpiCard label="Pfa" value={fmt(m?.pfa, 2)} />
                   </div>
-                  <Waterfall
-                    name={name}
-                    t={run.t}
-                    window={WINDOW_S}
-                    channels={run.init.channels}
-                    dwells={run.dwells[name]}
-                    events={run.events}
-                    emitters={run.init.emitters}
-                  />
+
+                  <div className="waterfall-wrap">
+                    <Waterfall
+                      name={name}
+                      t={run.t}
+                      window={WINDOW_S}
+                      channels={run.init.channels}
+                      dwells={run.dwells[name]}
+                      events={run.events}
+                      emitters={run.init.emitters}
+                    />
+                  </div>
                 </article>
               );
             })}
           </section>
-          <div className="legend reasons">
-            {Object.entries(REASON_LABELS).map(([k, v]) => (
-              <span key={k}>
-                <i style={{ background: REASON_COLORS[k] }} />
-                {v}
+
+          {/* Minimalist Legend Strip */}
+          <div className="legend-strip panel">
+            <span className="legend-title">Waterfall Legend:</span>
+            <div className="legend-items">
+              {Object.entries(REASON_LABELS).map(([k, v]) => (
+                <span key={k} className="legend-tag">
+                  <i style={{ background: REASON_COLORS[k] }} />
+                  <span>{v}</span>
+                </span>
+              ))}
+              <span className="legend-tag">
+                <i className="outline good" />
+                <span>Beam Intercepted</span>
               </span>
-            ))}
-            <span>
-              <i className="outline good" />
-              illumination intercepted
-            </span>
-            <span>
-              <i className="outline bad" />
-              illumination missed
-            </span>
-            <span className="muted">y-axis: channel centre [GHz]</span>
+              <span className="legend-tag">
+                <i className="outline bad" />
+                <span>Beam Missed</span>
+              </span>
+            </div>
+            <span className="legend-axis-note">Vertical axis: Frequency channel center (GHz)</span>
           </div>
 
-          <section className="bottom">
-            <article className="panel">
-              <h3>Threat-weighted Pd over the mission</h3>
+          {/* Lower Analytical Deck */}
+          <section className="analytical-deck">
+            <article className="panel analytical-card">
+              <div className="card-header">
+                <h3>Threat-Weighted Pd Trajectory</h3>
+                <span className="card-subtitle">Cumulative performance across elapsed mission duration</span>
+              </div>
               <LineChart
                 series={run.init.schedulers.map((s) => ({ name: s, points: run.history[s] }))}
                 xMax={run.init.duration}
@@ -261,12 +539,18 @@ export function LiveView({ scenarios, schedulers }: { scenarios: ScenarioInfo[];
               />
               <Legend names={run.init.schedulers} />
             </article>
-            <article className="panel">
-              <h3>Emitter tracks {trackOwner ? `(${trackOwner})` : ""}</h3>
+
+            <article className="panel analytical-card">
+              <div className="card-header">
+                <h3>Cognitive Emitter Tracks {trackOwner ? `(${trackOwner})` : ""}</h3>
+                <span className="card-subtitle">Deinterleaved pulse clusters &amp; beam period estimators</span>
+              </div>
               {trackOwner ? (
                 <TrackTable rows={run.tracks[trackOwner]} />
               ) : (
-                <p className="muted">Open-loop schedulers keep no tracks.</p>
+                <div className="no-tracks">
+                  <p>Open-loop legacy sweeps do not maintain tracks or estimate radar beam rotation periods.</p>
+                </div>
               )}
             </article>
           </section>
@@ -276,11 +560,14 @@ export function LiveView({ scenarios, schedulers }: { scenarios: ScenarioInfo[];
   );
 }
 
-function Kpi({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+function KpiCard({ label, value, sub, highlight }: { label: string; value: string; sub?: string; highlight?: boolean }) {
   return (
-    <div className={`kpi ${strong ? "strong" : ""}`}>
-      <span>{label}</span>
-      <b>{value}</b>
+    <div className={`kpi-card ${highlight ? "highlight" : ""}`}>
+      <span className="kpi-label">{label}</span>
+      <div className="kpi-val-row">
+        <b className="kpi-value">{value}</b>
+        {sub && <span className="kpi-sub">{sub}</span>}
+      </div>
     </div>
   );
 }
@@ -289,15 +576,15 @@ function TrackTable({ rows }: { rows: TrackRow[] }) {
   const sorted = [...rows].sort((a, b) => b.threat - a.threat || b.hits - a.hits).slice(0, 14);
   return (
     <div className="table-wrap">
-      <table>
+      <table className="clean-table">
         <thead>
           <tr>
             <th>#</th>
-            <th>RF GHz</th>
-            <th>AOA°</th>
-            <th>PRI µs</th>
-            <th>PW µs</th>
-            <th>Scan period</th>
+            <th>RF (GHz)</th>
+            <th>Bearing (AOA)</th>
+            <th>PRI (µs)</th>
+            <th>PW (µs)</th>
+            <th>Period &amp; Lock</th>
             <th>Threat</th>
             <th>Hits</th>
           </tr>
@@ -305,19 +592,31 @@ function TrackTable({ rows }: { rows: TrackRow[] }) {
         <tbody>
           {sorted.map((r) => (
             <tr key={r.id}>
-              <td>{r.id}</td>
-              <td>
+              <td className="mono muted-text">{r.id}</td>
+              <td className="mono">
                 {r.rf_ghz.toFixed(2)}
-                {r.agile ? " ⇄" : ""}
+                {r.agile && <span className="agile-tag" title="Frequency Agile"> ⇄</span>}
               </td>
-              <td>{r.aoa.toFixed(0)}</td>
-              <td>{r.pri_us ?? "–"}</td>
-              <td>{r.pw_us}</td>
-              <td>{r.period ? <span className="locked">{r.period.toFixed(3)}s 🔒</span> : <span className="muted">acquiring</span>}</td>
-              <td>{r.threat.toFixed(1)}</td>
+              <td className="mono">∠{r.aoa.toFixed(0)}°</td>
+              <td className="mono">{r.pri_us ? r.pri_us.toFixed(1) : "–"}</td>
+              <td className="mono">{r.pw_us.toFixed(1)}</td>
               <td>
+                {r.period ? (
+                  <span className="lock-pill locked">
+                    <LockIcon className="inline-icon" /> {r.period.toFixed(3)}s
+                  </span>
+                ) : (
+                  <span className="lock-pill acquiring">Acquiring…</span>
+                )}
+              </td>
+              <td>
+                <span className={`threat-badge threat-${Math.min(Math.floor(r.threat), 3)}`}>
+                  {r.threat.toFixed(1)}
+                </span>
+              </td>
+              <td className="mono">
                 {r.hits}
-                {r.locked_hits ? ` (+${r.locked_hits})` : ""}
+                {r.locked_hits > 0 && <span className="locked-hits"> (+{r.locked_hits})</span>}
               </td>
             </tr>
           ))}

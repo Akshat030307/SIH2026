@@ -11,13 +11,15 @@ N_FREQ = 16
 CACHE = ROOT / "data" / "deinterleave_windows.npz"
 
 
+PERIODS = np.geomspace(20e-6, 20e-3, N_FREQ).astype(np.float32)
+TWO_PI_OVER_PERIODS = (2 * np.pi / PERIODS).astype(np.float32)
+
+
 def pulse_inputs(pdws: np.ndarray) -> np.ndarray:
     """(N, 5 + 2·N_FREQ) float32 inputs. Time features are relative to the first pulse."""
     a = np.deg2rad(pdws["aoa"])
     toa = pdws["toa"] - pdws["toa"][0]
-    # periods from 20 µs to ~20 ms, log-spaced
-    periods = np.geomspace(20e-6, 20e-3, N_FREQ)
-    ph = 2 * np.pi * toa[:, None] / periods[None, :]
+    ph = toa[:, None] * TWO_PI_OVER_PERIODS[None, :]
     static = np.stack([
         (pdws["rf"] - 10e9) / 5e9,
         np.log10(np.maximum(pdws["pw"], 1e-9) * 1e6),
@@ -30,14 +32,17 @@ def pulse_inputs(pdws: np.ndarray) -> np.ndarray:
 def make_windows(pdws: np.ndarray, rng, n: int, window: int = WINDOW):
     x = pulse_inputs(pdws)
     y = pdws["emitter"].astype(np.int64)
+    toa = pdws["toa"]
+    L = len(x)
     out = []
     for _ in range(n):
-        if len(x) <= window:
-            s = 0
-        else:
-            s = int(rng.integers(0, len(x) - window))
-        xs, ys = x[s:s + window].copy(), y[s:s + window]
-        xs[:, 5:] = pulse_inputs(pdws[s:s + window])[:, 5:]  # time features relative to the window start
+        s = 0 if L <= window else int(rng.integers(0, L - window))
+        xs = x[s : s + window].copy()
+        ys = y[s : s + window]
+        dt = (toa[s : s + window] - toa[s])[:, None]
+        ph = dt * TWO_PI_OVER_PERIODS[None, :]
+        xs[:, 5 : 5 + N_FREQ] = np.sin(ph)
+        xs[:, 5 + N_FREQ :] = np.cos(ph)
         out.append((xs, ys))
     return out
 

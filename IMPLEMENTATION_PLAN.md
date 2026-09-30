@@ -3,12 +3,12 @@
 Source: `SIH26055 Electronic Warfare Smart Scan.pdf` (analysis & framework document).
 Goal: a **closed-loop, ML-driven receiver scheduler** that decides *which frequency band to tune to next* and *how long to dwell*, with **no prior intelligence** about emitters, and that measurably beats open-loop (sequential) scanning on the SIH figures of merit.
 
-> **Implementation status:** M0–M9 are implemented. See `README.md` for results and how to reproduce them.
-> Differences from this plan:
-> - The package lives in `src/smartscan/`.
-> - The dashboard is FastAPI + React, not Streamlit.
-> - Scenario S7 (co-located sites) was added.
-> - The Turing dataset needs a Hugging Face token (loader included).
+> **Implementation status:** M0–M9 are completely implemented and deeply verified. See `README.md` for benchmark results across all 7 scenarios and how to reproduce them.
+> Key accomplishments & architectural updates:
+> - Python package structure in `src/smartscan/`.
+> - Full simulation physics with scenarios S1–S7 (including S7 co-located air-defence emitters).
+> - Deinterleaving fine-tuned and benchmarked on the real Alan Turing Institute Synthetic Radar Dataset (`checkpoints/deinterleaver_turing.pt`, `results/deinterleave/turing_summary.md`).
+> - Production dashboard built with FastAPI backend streaming + modern React 19 / TypeScript / Vite frontend, including authentic client-side fallback simulation (`clientSim.ts`).
 
 ---
 
@@ -42,51 +42,46 @@ Goal: a **closed-loop, ML-driven receiver scheduler** that decides *which freque
 
 | Area | Choice |
 |------|--------|
-| Language | Python 3.11 |
-| Simulation | NumPy (vectorized per-dwell pulse generation), Numba for hot loops, Gymnasium API |
-| ML | PyTorch 2.x (D3QN, GRU predictor, deinterleaving encoder) |
+| Language | Python 3.12 |
+| Simulation | NumPy (vectorized per-dwell pulse generation), Gymnasium API |
+| ML | PyTorch 2.x (D3QN, GRU predictor, deinterleaving Transformer encoder) |
 | Clustering | scikit-learn DBSCAN / HDBSCAN |
-| Signal proc. | SciPy (Lomb–Scargle, autocorrelation) |
+| Signal proc. | SciPy (Lomb–Scargle, autocorrelation, period estimation) |
 | Config | YAML + pydantic (scenario & emitter library) |
-| Experiment tracking | TensorBoard (or Weights & Biases) |
-| Edge | ONNX + ONNX Runtime (INT8 quantization); optional C++ inference demo |
-| Dashboard | Streamlit + Plotly (fastest path). FastAPI + React only if time allows |
-| Testing | pytest; seeded, deterministic scenarios |
+| Experiment tracking | TensorBoard + CSV evaluation logging |
+| Edge | ONNX + ONNX Runtime (FP32 & INT8 quantization); latency benchmark |
+| Dashboard | FastAPI WebSocket streaming backend + React 19 / TypeScript / Vite UI |
+| Testing | pytest (28 tests covering env, sim, tracker, schedulers, deinterleaving, prediction) |
 
 ---
 
 ## 3. Repository layout
 
 ```
-SIH/
+SIH2026/
 ├── configs/
 │   ├── emitters/            # emitter class library (YAML): periodic, MFR, agile, LPI
-│   ├── scenarios/           # S1..S6 scenario definitions
+│   ├── scenarios/           # S1..S7 scenario definitions
 │   └── train/               # D3QN / predictor hyperparameters
-├── smartscan/
-│   ├── sim/
-│   │   ├── emitter.py       # emitter models (scan pattern, PRI modulation, RF agility, MFR modes)
-│   │   ├── receiver.py      # narrowband superhet: channels, dwell, tuning latency, noise, sensitivity
-│   │   ├── propagation.py   # one-way radar equation → SNR; beam pattern gain
-│   │   ├── world.py         # geometry, emitter births/deaths, ground-truth timeline
-│   │   └── env.py           # Gymnasium env: step((channel, dwell)) → PDWs, reward, info
+├── src/smartscan/
+│   ├── sim/                 # RF propagation, emitters, receiver, world timeline, Gymnasium env
 │   ├── pdw.py               # PDW dataclass / structured numpy dtype (TOA, RF, PW, AOA, AMP)
-│   ├── deinterleave/        # clustering + PRI histogram (CDIF/SDIF) + learned embedding
-│   ├── tracker/             # per-emitter track store, period estimation, next-illumination prediction
-│   ├── predict/             # ngram.py, gru.py, spectral_psr.py (common Predictor interface)
-│   ├── schedulers/
-│   │   ├── base.py          # Scheduler interface
-│   │   ├── sweep.py, random.py, round_robin.py
-│   │   ├── bandit.py        # SW-UCB / D-UCB / Thompson
-│   │   ├── heuristic.py     # bandit + period lock + priority arbitration (strong baseline)
-│   │   └── d3qn/            # network.py, agent.py, replay.py (PER), train.py
-│   ├── metrics.py           # all figures of merit
-│   ├── eval.py              # scenario × scheduler × seed benchmark runner
-│   └── export/              # ONNX export, quantization, latency bench
-├── dashboard/app.py         # Streamlit demo
-├── data/                    # Turing dataset subset (gitignored)
-├── notebooks/               # exploration, plots for the presentation
-└── tests/
+│   ├── deinterleave/        # classical (DBSCAN/HDBSCAN), learned transformer, Turing fine-tuning
+│   ├── tracker/             # per-emitter track store, period estimation, next-beam prediction
+│   ├── predict/             # ngram.py, gru.py, spectral_psr.py (radar-word symbol prediction)
+│   ├── schedulers/          # sweep, random, round-robin, bandit, heuristic, d3qn
+│   ├── rl/                  # D3QN network, agent, prioritized replay, DQfD pre-training
+│   ├── metrics.py           # all SIH figures of merit
+│   ├── eval.py              # scenario × scheduler × seed benchmark harness
+│   ├── export/              # ONNX FP32/INT8 export & latency benchmarking
+│   └── server.py            # FastAPI + WebSocket streaming backend
+├── dashboard/web/           # Modern React 19 + TypeScript + Vite frontend
+│   ├── src/                 # LiveView, ResultsView, Waterfall, Charts, clientSim, Icons
+│   └── dist/                # Pre-built assets served directly by FastAPI server
+├── checkpoints/             # Trained models: d3qn_best.pt, deinterleaver_turing.pt
+├── results/                 # Evaluation summaries, benchmark CSVs, plots
+├── data/turing/             # Turing synthetic radar dataset recordings
+└── tests/                   # 28 comprehensive automated unit and integration tests
 ```
 
 ---

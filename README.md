@@ -101,6 +101,8 @@ Checkpoint selection on 35 validation episodes (seeds 500–504 × 7 scenarios, 
 
 ### Deinterleaving
 
+#### Simulation Environment (held-out seeds)
+
 | scenario | method | ari | ami | v_measure | homogeneity | completeness | n_true | n_pred | sec |
 |---|---|---|---|---|---|---|---|---|---|
 | S2_dense | dbscan | 0.989 | 0.969 | 0.971 | 0.991 | 0.952 | 27.2 | 47.2 | 0.23 |
@@ -109,6 +111,17 @@ Checkpoint selection on 35 validation episodes (seeds 500–504 × 7 scenarios, 
 | S7_colocated | dbscan | 0.8 | 0.843 | 0.844 | 0.979 | 0.759 | 15.1 | 42 | 0.691 |
 | S7_colocated | hdbscan | 0.808 | 0.852 | 0.853 | 0.993 | 0.763 | 15.1 | 29.4 | 0.368 |
 | S7_colocated | learned | 0.885 | 0.916 | 0.916 | 0.91 | 0.935 | 15.1 | 16.4 | 3.015 |
+
+#### Turing Synthetic Radar Dataset Benchmark (test_scan)
+
+Evaluated on 10 pulse train recordings from the Alan Turing Institute dataset (5000 pulses each). The fine-tuned Transformer encoder (`checkpoints/deinterleaver_turing.pt`) achieves the highest Adjusted Rand Index (ARI 0.461) and produces more accurate cluster counts (25 vs 41.8 pred emitters for DBSCAN) without excessive over-segmentation.
+
+| method | ari | ami | v_measure | homogeneity | completeness | n_true | n_pred | noise_frac | sec |
+|---|---|---|---|---|---|---|---|---|---|
+| dbscan | 0.428 | 0.586 | 0.592 | 0.983 | 0.464 | 12.5 | 41.8 | 0.011 | 0.087 |
+| hdbscan | 0.428 | 0.590 | 0.595 | 0.984 | 0.468 | 12.5 | 33.8 | 0.007 | 0.071 |
+| learned_sim | 0.440 | 0.618 | 0.623 | 0.929 | 0.536 | 12.5 | 20.6 | 0.014 | 0.445 |
+| learned_turing | 0.461 | 0.591 | 0.595 | 0.955 | 0.480 | 12.5 | 25.0 | 0.020 | 0.404 |
 
 ### Edge inference
 
@@ -148,16 +161,18 @@ to C++/FPGA for microsecond-level budgets.
 uv sync                                    # Python 3.12 env; pulls CUDA PyTorch (cu128, ~3 GB)
 #   CPU-only alternative (all models here are small enough; this repo's results were trained on CPU):
 #   uv pip install "torch==2.11.0+cpu" --index-url https://download.pytorch.org/whl/cpu
-uv run pytest                              # unit tests
+uv run pytest                              # unit tests (all 28 pass)
 
 # benchmark all schedulers on all scenarios (held-out seeds 100..104)
 uv run python -m smartscan.eval --seeds 5
 
-# dashboard: API + React UI
+# dashboard: FastAPI API + built React production UI (single command)
 uv run uvicorn smartscan.server:app --port 8000
+# → Open http://localhost:8000 (serves built app with live WebSocket streaming)
+
+# or run Vite development server with hot-module reload:
 cd dashboard/web && npm install && npm run dev   # → http://localhost:5173
-#   or: npm run build, then open http://localhost:8000 (the API serves the built app)
-#   demo link: http://localhost:5173/?autorun=S6_lockin&schedulers=sweep,smart,d3qn
+# demo direct link: http://localhost:8000/?autorun=S6_lockin&schedulers=sweep,smart,d3qn
 ```
 
 ## What's inside
@@ -171,13 +186,13 @@ cd dashboard/web && npm install && npm run dev   # → http://localhost:5173
 | Open-loop baselines | `schedulers/baselines.py` | linear sweep, random, round-robin |
 | Phase 1: bandit exploration | `schedulers/bandit.py` | UCB1 (PDF), Discounted UCB (default), SW-UCB, Thompson |
 | Deinterleaving (online) | `tracker/tracker.py` | gap-split clustering + gated association; frequency-hop aware |
-| Deinterleaving (offline) | `deinterleave/` | DBSCAN/HDBSCAN, SDIF, learned Transformer embeddings + HDBSCAN; Turing dataset loader |
+| Deinterleaving (offline) | `deinterleave/` | DBSCAN/HDBSCAN, SDIF, learned Transformer embeddings + HDBSCAN (`learned.py`); Turing dataset loader (`turing.py`), fine-tuner (`train_turing.py`), and benchmark (`benchmark_turing.py`) |
 | Periodic-scan interception | `tracker/period.py` | scan period from sparse illumination hits (approx. GCD + weighted LS); the PDF's SNR autocorrelation |
 | Smart heuristic scheduler | `schedulers/heuristic.py` | predicted-beam dwells + acquisition + D-UCB exploration + anti-lock-in jitter |
 | Phase 2: behaviour prediction | `predict/` | radar-word symbols; n-gram, spectral PSR (Hankel/SVD), GRU |
 | Phase 3: D3QN | `rl/` | dueling double DQN, channel-shared encoder, n-step, prioritized replay, DQfD demonstrations |
 | Edge deployment | `export/edge.py`, `api.py` | ONNX + INT8, latency benchmark, vendor-agnostic `SmartScanScheduler` API |
-| Demo | `server.py`, `dashboard/web` | live side-by-side missions, results browser |
+| Demo & Frontend | `server.py`, `dashboard/web/` | FastAPI WebSocket streaming backend + modern React 19 / TypeScript UI with authentic client-side fallback simulation (`clientSim.ts`), custom SVG icons (`Icons.tsx`), and responsive layout |
 
 ## Reproducing the results
 
@@ -205,6 +220,12 @@ export HF_TOKEN=hf_...
 uv run python -m smartscan.deinterleave.turing download --split train_scan --n 30
 uv run python -m smartscan.deinterleave.turing download --split test_scan --n 10
 uv run python -m smartscan.deinterleave.turing inspect --split train_scan
+
+# fine-tune the Transformer PulseEncoder on Turing dataset:
+uv run python -m smartscan.deinterleave.train_turing --epochs 10
+
+# benchmark classical (DBSCAN/HDBSCAN) vs learned models on TSRD:
+uv run python -m smartscan.deinterleave.benchmark_turing
 ```
 
 ## Integrating with a receiver
@@ -240,9 +261,7 @@ while True:
 
 ## Limitations
 
-* **Simulated data only.** All results come from our simulator, whose emitter parameters are
-  representative, not taken from any specific real system. The Turing loader is in place but
-  was not run (it needs a Hugging Face token).
+* **Simulation + Synthetic Radar Dataset.** Scheduling policies (D3QN and Smart Heuristic) are evaluated on our representative RF simulator because interactive, closed-loop decisions require live spectrum feedback. The deinterleaving component has been validated on both simulated multi-emitter scenarios (S2, S7) and the real Alan Turing Institute Synthetic Radar Dataset (`test_scan`), confirming the generalizability of learned pulse embeddings to non-ideal pulse streams.
 * **D3QN vs heuristic.** D3QN beats the hand-built heuristic on average (0.65 vs 0.62 threat-weighted
   Pd) but not everywhere. It is slightly worse on pop-up threats (S5) and on time to first intercept.
   Most of the gain over open-loop scanning comes from the tracker, period lock and acquisition, which

@@ -58,10 +58,11 @@ class GRUPredictor(Predictor):
         self.net.eval()
         return self
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def predict_all(self, seq):
         x = torch.as_tensor(np.asarray(seq[:-1]), dtype=torch.long, device=self.device)[None]
         return torch.softmax(self.net(x)[0], -1).cpu().numpy()
 
     def predict_proba(self, history):
-        return self.predict_all(np.append(history, 0))[-1]
+        hist = history[-self.chunk :] if len(history) > self.chunk else history
+        return self.predict_all(np.append(hist, 0))[-1]

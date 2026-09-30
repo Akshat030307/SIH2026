@@ -24,6 +24,14 @@ import numpy as np
 from smartscan import pdw as P
 from smartscan.sim.world import ROOT
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+    load_dotenv(ROOT / ".env")
+    load_dotenv(Path.home() / ".env")
+except ImportError:
+    pass
+
 REPO = "alan-turing-institute/turing-synthetic-radar-dataset"
 DATA_DIR = ROOT / "data" / "turing"
 
@@ -41,22 +49,49 @@ def list_files(split: str, mode: str = "scan") -> list[dict]:
     return [x for x in json.load(_req(url)) if x.get("type") == "file"]
 
 
-def download(split: str = "train_scan", n: int = 30, mode: str = "scan", seed: int = 0) -> list[Path]:
+def download(split: str = "train_scan", n: int = 30, mode: str = "scan", seed: int = 0, max_workers: int = 8) -> list[Path]:
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     files = list_files(split, mode)
-    rng = np.random.default_rng(seed)
-    pick = rng.choice(len(files), size=min(n, len(files)), replace=False)
+    if n >= len(files):
+        pick = list(range(len(files)))
+    else:
+        rng = np.random.default_rng(seed)
+        pick = sorted(rng.choice(len(files), size=n, replace=False).tolist())
+
     out_dir = DATA_DIR / split
     out_dir.mkdir(parents=True, exist_ok=True)
-    got = []
-    for i in sorted(pick):
-        f = files[i]
+
+    targets = [files[i] for i in pick]
+    print(f"Downloading {len(targets)} files for {split} ({mode}) using {max_workers} threads...")
+
+    def _fetch(f):
         dst = out_dir / Path(f["path"]).name
-        if not dst.exists():
+        if not dst.exists() or dst.stat().st_size == 0:
             url = f"https://huggingface.co/datasets/{REPO}/resolve/main/{f['path']}"
-            with _req(url) as r:
-                dst.write_bytes(r.read())
-            print(f"  {dst.name} ({dst.stat().st_size / 1e6:.1f} MB)")
-        got.append(dst)
+            for attempt in range(4):
+                try:
+                    with _req(url) as r:
+                        dst.write_bytes(r.read())
+                    print(f"  + {dst.name} ({dst.stat().st_size / 1e6:.1f} MB)")
+                    break
+                except Exception as e:
+                    if attempt == 3:
+                        print(f"  x Failed {dst.name}: {e}")
+                        raise
+                    time.sleep(1.0 * (attempt + 1))
+        else:
+            print(f"  = {dst.name} (cached)")
+        return dst
+
+    got = []
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [pool.submit(_fetch, f) for f in targets]
+        for fut in as_completed(futures):
+            try:
+                got.append(fut.result())
+            except Exception:
+                pass
     return got
 
 
@@ -108,21 +143,32 @@ def local_files(split: str) -> list[Path]:
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["download", "inspect"])
-    ap.add_argument("--split", default="train_scan")
+    ap = argparse.ArgumentParser(description="Turing Synthetic Radar Dataset tooling")
+    ap.add_argument("cmd", choices=["download", "inspect", "eval", "train"])
+    ap.add_argument("--split", default="test_scan")
+    ap.add_argument("--mode", default="scan", choices=["scan", "stare", "archive"])
+    ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--n", type=int, default=30)
+    ap.add_argument("--max-pulses", type=int, default=5000)
+    ap.add_argument("--epochs", type=int, default=10)
     a = ap.parse_args(argv)
     if a.cmd == "download":
         if not (os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")):
             raise SystemExit("HF_TOKEN is not set; see the module docstring")
-        download(a.split, a.n)
-    else:
+        download(split=a.split, n=a.n, mode=a.mode, max_workers=a.workers)
+    elif a.cmd == "inspect":
         files = local_files(a.split)
         if not files:
             raise SystemExit(f"no files in {DATA_DIR / a.split}")
         inspect(files[0])
+    elif a.cmd == "eval":
+        from smartscan.deinterleave.benchmark_turing import evaluate_tsrd
+        evaluate_tsrd(split=a.split, max_pulses=a.max_pulses)
+    elif a.cmd == "train":
+        from smartscan.deinterleave.train_turing import train_turing
+        train_turing(epochs=a.epochs)
 
 
 if __name__ == "__main__":
     main()
+

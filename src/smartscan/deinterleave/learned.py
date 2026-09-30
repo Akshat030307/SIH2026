@@ -26,11 +26,16 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+if torch.cuda.is_available():
+    torch.set_float32_matmul_precision("high")
+
 from smartscan.deinterleave.dataset import N_FREQ, WINDOW, cached_training_set, pulse_inputs
 from smartscan.sim.world import ROOT
 from smartscan.util import md_table
 
 CKPT = ROOT / "checkpoints" / "deinterleaver.pt"
+PERIODS = np.geomspace(20e-6, 20e-3, N_FREQ).astype(np.float32)
+TWO_PI_OVER_PERIODS = (2 * np.pi / PERIODS).astype(np.float32)
 
 
 class PulseEncoder(nn.Module):
@@ -38,7 +43,7 @@ class PulseEncoder(nn.Module):
         super().__init__()
         self.inp = nn.Sequential(nn.Linear(d_in, d), nn.GELU(), nn.Linear(d, d))
         enc = nn.TransformerEncoderLayer(d, heads, 4 * d, dropout=0.05, batch_first=True, norm_first=True)
-        self.enc = nn.TransformerEncoder(enc, layers)
+        self.enc = nn.TransformerEncoder(enc, layers, enable_nested_tensor=False)
         self.out = nn.Linear(d, d_out)
 
     def forward(self, x, pad_mask=None):
@@ -98,34 +103,123 @@ def load(device: str | None = None) -> PulseEncoder:
     return m.to(device).eval()
 
 
-@torch.no_grad()
-def embed(model: PulseEncoder, pdws: np.ndarray, window: int = WINDOW, stride: int = 192) -> np.ndarray:
-    dev = next(model.parameters()).device
+@torch.inference_mode()
+def embed(
+    model: PulseEncoder,
+    pdws: np.ndarray,
+    window: int = WINDOW,
+    stride: int = 192,
+    batch_size: int = 64,
+) -> np.ndarray:
     n = len(pdws)
-    acc = np.zeros((n, model.out.out_features), np.float32)
-    cnt = np.zeros(n, np.float32)
+    d_out = model.out.out_features
+    if n == 0:
+        return np.zeros((0, d_out), dtype=np.float32)
+
+    dev = next(model.parameters()).device
+
+    if n < window:
+        inp = torch.from_numpy(pulse_inputs(pdws))[None].to(dev, non_blocking=True)
+        z = model(inp)[0].cpu().numpy()
+        norm = np.linalg.norm(z, axis=1, keepdims=True)
+        return z / np.maximum(norm, 1e-9)
+
     starts = list(range(0, max(n - window, 0) + 1, stride))
     if starts[-1] + window < n:
         starts.append(n - window)
-    for s in starts:
-        seg = pdws[s:s + window]
-        z = model(torch.from_numpy(pulse_inputs(seg))[None].to(dev))[0].cpu().numpy()
-        acc[s:s + len(seg)] += z
-        cnt[s:s + len(seg)] += 1
-    z = acc / np.maximum(cnt, 1)[:, None]
-    return z / np.maximum(np.linalg.norm(z, axis=1, keepdims=True), 1e-9)
+
+    if dev.type == "cuda":
+        a_rad = torch.deg2rad(torch.from_numpy(pdws["aoa"].astype(np.float32)).to(dev, non_blocking=True))
+        rf = torch.from_numpy(pdws["rf"].astype(np.float32)).to(dev, non_blocking=True)
+        pw = torch.from_numpy(pdws["pw"].astype(np.float32)).to(dev, non_blocking=True)
+        amp = torch.from_numpy(pdws["amp"].astype(np.float32)).to(dev, non_blocking=True)
+        toa = torch.from_numpy(pdws["toa"].astype(np.float32)).to(dev, non_blocking=True)
+
+        static = torch.stack([
+            (rf - 10e9) / 5e9,
+            torch.log10(torch.clamp(pw, min=1e-9) * 1e6),
+            torch.sin(a_rad),
+            torch.cos(a_rad),
+            (amp - 30.0) / 15.0,
+        ], dim=1)
+        two_pi_periods = torch.from_numpy(TWO_PI_OVER_PERIODS).to(dev, non_blocking=True)
+
+        acc = torch.zeros((n, d_out), dtype=torch.float32, device=dev)
+        cnt = torch.zeros((n, 1), dtype=torch.float32, device=dev)
+
+        for i in range(0, len(starts), batch_size):
+            b_starts = starts[i : i + batch_size]
+            stat_b = torch.stack([static[s : s + window] for s in b_starts])
+            toa_b = torch.stack([toa[s : s + window] - toa[s] for s in b_starts])
+            ph_b = toa_b.unsqueeze(-1) * two_pi_periods
+            bx = torch.cat([stat_b, torch.sin(ph_b), torch.cos(ph_b)], dim=-1)
+            z_b = model(bx)
+            for b_idx, s in enumerate(b_starts):
+                acc[s : s + window] += z_b[b_idx]
+                cnt[s : s + window] += 1.0
+
+        z = acc / torch.clamp(cnt, min=1.0)
+        norm = torch.linalg.norm(z, dim=1, keepdim=True)
+        z = z / torch.clamp(norm, min=1e-9)
+        return z.cpu().numpy()
+    else:
+        a = np.deg2rad(pdws["aoa"])
+        static = np.stack([
+            (pdws["rf"] - 10e9) / 5e9,
+            np.log10(np.maximum(pdws["pw"], 1e-9) * 1e6),
+            np.sin(a),
+            np.cos(a),
+            (pdws["amp"] - 30.0) / 15.0,
+        ], axis=1).astype(np.float32)
+        toa = pdws["toa"]
+
+        acc = np.zeros((n, d_out), dtype=np.float32)
+        cnt = np.zeros(n, dtype=np.float32)
+
+        for i in range(0, len(starts), batch_size):
+            b_starts = starts[i : i + batch_size]
+            B = len(b_starts)
+            batch_x = np.empty((B, window, 5 + 2 * N_FREQ), dtype=np.float32)
+            for b_idx, s in enumerate(b_starts):
+                batch_x[b_idx, :, :5] = static[s : s + window]
+                ph = (toa[s : s + window] - toa[s])[:, None] * TWO_PI_OVER_PERIODS[None, :]
+                batch_x[b_idx, :, 5 : 5 + N_FREQ] = np.sin(ph)
+                batch_x[b_idx, :, 5 + N_FREQ :] = np.cos(ph)
+
+            bx_t = torch.from_numpy(batch_x).to(dev)
+            z_b = model(bx_t).cpu().numpy()
+            for b_idx, s in enumerate(b_starts):
+                acc[s : s + window] += z_b[b_idx]
+                cnt[s : s + window] += 1.0
+
+        z = acc / np.maximum(cnt, 1.0)[:, None]
+        norm = np.linalg.norm(z, axis=1, keepdims=True)
+        return z / np.maximum(norm, 1e-9)
 
 
-def learned_deinterleave(model, pdws: np.ndarray, min_cluster_size: int = 40, w_emb: float = 8.0,
-                         w_static: float = 0.25) -> np.ndarray:
-    """HDBSCAN on [w_emb·embedding, w_static·scaled static features] (weights tuned on validation seeds 2000+)."""
+def learned_deinterleave(
+    model,
+    pdws: np.ndarray,
+    min_cluster_size: int = 30,
+    w_emb: float = 10.0,
+    w_static: float = 0.20,
+    core_dist_n_jobs: int = -1,
+) -> np.ndarray:
+    """HDBSCAN on [w_emb·embedding, w_static·scaled static features]."""
     import hdbscan
 
     from smartscan.deinterleave.classical import _scaled
 
+    if len(pdws) < min_cluster_size:
+        return np.zeros(len(pdws), dtype=int)
+
     z = embed(model, pdws)
     feats = np.concatenate([z * w_emb, w_static * _scaled(pdws) / 4.0], axis=1)
-    return hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, min_samples=5).fit_predict(feats)
+    return hdbscan.HDBSCAN(
+        min_cluster_size=min_cluster_size,
+        min_samples=5,
+        core_dist_n_jobs=core_dist_n_jobs,
+    ).fit_predict(feats)
 
 
 def evaluate(seeds=range(1000, 1010), scenarios=("S7_colocated", "S2_dense")) -> dict:

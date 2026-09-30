@@ -172,7 +172,7 @@ class D3QNAgent:
         self.opt = torch.optim.Adam(self.q.parameters(), lr=lr)
         self.gamma, self.n_step, self.margin, self.lambda_demo, self.tau = gamma, n_step, margin, lambda_demo, tau
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def act(self, obs: np.ndarray, eps: float, rng) -> np.ndarray:
         q = self.q(torch.as_tensor(obs, dtype=torch.float32, device=self.device))
         a = q.argmax(1).cpu().numpy()

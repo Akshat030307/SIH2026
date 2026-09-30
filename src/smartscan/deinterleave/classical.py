@@ -33,13 +33,14 @@ def dbscan_deinterleave(pdws: np.ndarray, eps: float = 1.5, min_samples: int = 5
     return DBSCAN(eps=eps, min_samples=min_samples).fit_predict(_scaled(pdws, **scale))
 
 
-def hdbscan_deinterleave(pdws: np.ndarray, min_cluster_size: int = 15, min_samples: int = 5, **scale) -> np.ndarray:
+def hdbscan_deinterleave(pdws: np.ndarray, min_cluster_size: int = 15, min_samples: int = 5,
+                         core_dist_n_jobs: int = -1, **scale) -> np.ndarray:
     import hdbscan
 
     if len(pdws) < min_cluster_size:
         return np.zeros(len(pdws), dtype=int)
     return hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, min_samples=min_samples,
-                           core_dist_n_jobs=1).fit_predict(_scaled(pdws, **scale))
+                           core_dist_n_jobs=core_dist_n_jobs).fit_predict(_scaled(pdws, **scale))
 
 
 def sdif_split(toa: np.ndarray, max_emitters: int = 4, bins: int = 400, thresh: float = 0.35) -> np.ndarray:
