@@ -46,7 +46,7 @@ export const SERIES_COLORS = [
 
 export const SCHEDULER_TAGS: Record<string, { label: string; color: string }> = {
   sweep: { label: "Baseline", color: "#64748b" },
-  random: { label: "Stochastic", color: "#94a3b8" },
+  random: { label: "Stochastic", color: "#38bdf8" },
   round_robin: { label: "Prioritized", color: "#ec4899" },
   bandit: { label: "Contextual Bandit", color: "#f59e0b" },
   smart: { label: "Cognitive Heuristic", color: "#10b981" },

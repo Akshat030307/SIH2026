@@ -1,5 +1,5 @@
 import { useState, useRef, useId } from "react";
-import { SERIES_COLORS } from "../theme";
+import { SERIES_COLORS, SCHEDULER_TAGS } from "../theme";
 
 export interface Series {
   name: string;
@@ -113,8 +113,7 @@ export function LineChart({
         {/* X axis labels */}
         {Array.from({ length: Math.floor(xMax / xStep) + 1 }, (_, i) => i * xStep).map((v) => (
           <text key={v} x={x(v)} y={H - 5} className="axis" textAnchor="middle">
-            {v}
-            {xUnit}
+            {v === 0 ? "0" : `${v}${xUnit}`}
           </text>
         ))}
 
@@ -200,6 +199,7 @@ export function BarChart({
   errors,
   yMax = 1,
   label,
+  colorMap,
 }: {
   groups: string[];
   series: string[];
@@ -207,16 +207,20 @@ export function BarChart({
   errors?: (number | null)[][];
   yMax?: number;
   label: string;
+  colorMap?: Record<string, string>;
 }) {
   const [activeCell, setActiveCell] = useState<{ group: string; sched: string; val: number; err?: number; x: number; y: number } | null>(null);
 
   const W = 900;
   const H = 250;
-  const L = 42;
+  const L = 46;
   const B = 32;
   const gw = (W - L - 16) / Math.max(groups.length, 1);
-  const bw = (gw * 0.8) / Math.max(series.length, 1);
+  const bw = (gw * 0.82) / Math.max(series.length, 1);
   const y = (v: number) => 8 + (1 - Math.min(Math.max(v, 0), yMax) / yMax) * (H - B - 8);
+
+  const getColor = (s: string, idx: number) =>
+    colorMap?.[s] ?? SCHEDULER_TAGS[s]?.color ?? SERIES_COLORS[idx % SERIES_COLORS.length];
 
   return (
     <div style={{ position: "relative", width: "100%" }}>
@@ -235,10 +239,11 @@ export function BarChart({
             {series.map((s, si) => {
               const v = values[gi]?.[si];
               if (v == null) return null;
-              const x0 = L + gi * gw + gw * 0.1 + si * bw;
+              const x0 = L + gi * gw + gw * 0.09 + si * bw;
               const e = errors?.[gi]?.[si] ?? 0;
               const barH = Math.max(y(0) - y(v), 2);
               const isHovered = activeCell?.group === g && activeCell?.sched === s;
+              const color = getColor(s, si);
 
               return (
                 <g
@@ -253,9 +258,9 @@ export function BarChart({
                     height={barH}
                     rx={2.5}
                     ry={2.5}
-                    fill={SERIES_COLORS[si % SERIES_COLORS.length]}
+                    fill={color}
                     opacity={isHovered ? 1 : 0.88}
-                    filter={isHovered ? "brightness(1.15)" : undefined}
+                    filter={isHovered ? "brightness(1.2)" : undefined}
                     style={{ transition: "opacity 0.15s, filter 0.15s" }}
                   />
                   {e > 0 && (
@@ -271,24 +276,28 @@ export function BarChart({
               );
             })}
             <text x={L + gi * gw + gw / 2} y={H - 10} className="axis" textAnchor="middle" style={{ fontWeight: 500 }}>
-              {g.replace(/^S(\d)_/, "S$1: ")}
+              {g.replace(/^S(\d)_/, "S$1: ").replace(/_/g, " ")}
             </text>
           </g>
         ))}
       </svg>
 
-      {/* Floating tooltip for BarChart */}
+      {/* Floating tooltip for BarChart with smart flip to prevent clipping */}
       {activeCell && (
         <div
           className="chart-tooltip"
           style={{
-            left: `${Math.min(Math.max((activeCell.x / W) * 100, 10), 90)}%`,
-            top: `${Math.max(4, Math.min((activeCell.y / H) * 100 - 8, 65))}%`,
-            transform: "translate(-50%, -100%)",
+            left: `${Math.min(Math.max((activeCell.x / W) * 100, 12), 88)}%`,
+            top: activeCell.y < 70 ? `${(activeCell.y / H) * 100 + 12}%` : `${(activeCell.y / H) * 100 - 8}%`,
+            transform: activeCell.y < 70 ? "translate(-50%, 0)" : "translate(-50%, -100%)",
           }}
         >
-          <div className="tooltip-header">{activeCell.group.replace("_", " ")}</div>
+          <div className="tooltip-header">{activeCell.group.replace(/^S(\d)_/, "S$1: ").replace(/_/g, " ")}</div>
           <div className="tooltip-row">
+            <span
+              className="tooltip-dot"
+              style={{ background: getColor(activeCell.sched, series.indexOf(activeCell.sched)) }}
+            />
             <span className="tooltip-label">{activeCell.sched}:</span>
             <span className="tooltip-val">
               {activeCell.val.toFixed(3)}
@@ -298,18 +307,18 @@ export function BarChart({
         </div>
       )}
 
-      <Legend names={series} />
+      <Legend names={series} colorMap={colorMap} />
     </div>
   );
 }
 
-export function Legend({ names }: { names: string[] }) {
+export function Legend({ names, colorMap }: { names: string[]; colorMap?: Record<string, string> }) {
   return (
     <div className="legend">
       {names.map((n, i) => (
         <span key={n} className="legend-item">
-          <i style={{ background: SERIES_COLORS[i % SERIES_COLORS.length] }} />
-          <span>{n}</span>
+          <i style={{ background: colorMap?.[n] ?? SCHEDULER_TAGS[n]?.color ?? SERIES_COLORS[i % SERIES_COLORS.length] }} />
+          <span>{SCHEDULER_TAGS[n]?.label ? `${n} (${SCHEDULER_TAGS[n].label})` : n}</span>
         </span>
       ))}
     </div>
